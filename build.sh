@@ -10,7 +10,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # Universal binary: Apple silicon and Intel.
 for arch in arm64 x86_64; do
     swiftc -O -swift-version 5 \
-        -target "$arch-apple-macos26.0" \
+        -target "$arch-apple-macos14.0" \
         -framework IOBluetooth -framework SwiftUI -framework Carbon -framework ServiceManagement \
         Sources/*.swift -o "build/BudsControl-$arch" 2>&1 | grep -v "^$" || true
     [[ -x "build/BudsControl-$arch" ]] || { echo "build failed ($arch)"; exit 1; }
@@ -39,7 +39,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>1.1.0</string>
     <key>CFBundleVersion</key><string>2</string>
-    <key>LSMinimumSystemVersion</key><string>26.0</string>
+    <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>NSBluetoothAlwaysUsageDescription</key>
     <string>Buds Control talks to your OnePlus Buds to switch noise cancellation and transparency.</string>

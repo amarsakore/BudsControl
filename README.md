@@ -27,7 +27,7 @@ on OnePlus Buds 4, without the phone app.</p>
 
 ## Requirements
 
-- macOS 26 (Tahoe) or later, on Apple silicon or Intel
+- macOS 14 (Sonoma) or later, on Apple silicon or Intel
 - OnePlus Buds 4, paired with the Mac in System Settings › Bluetooth
 
 Other OnePlus / OPPO earbuds that use the HeyMelody app (Buds 3, Buds Pro 2/3/4, Nord Buds 3 Pro / 4 / 4 Pro…)

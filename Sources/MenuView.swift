@@ -179,7 +179,21 @@ struct MenuView: View {
 
     private func openSettings() {
         openWindow(id: "settings")
-        NSApp.activate()
+        bringSettingsToFront()
+    }
+
+    private func bringSettingsToFront() {
+        let focus = {
+            NSApp.activate(ignoringOtherApps: true)
+            for window in NSApp.windows where window.title.contains("Settings") || window.identifier?.rawValue.contains("settings") == true {
+                window.makeKeyAndOrderFront(nil)
+                window.orderFrontRegardless()
+            }
+        }
+        focus()
+        DispatchQueue.main.async(execute: focus)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: focus)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: focus)
     }
 }
 

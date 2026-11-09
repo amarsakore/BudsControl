@@ -28,8 +28,17 @@ struct SettingsView: View {
             }
         }
         .frame(width: 560)
-        .frame(minHeight: 420)
+        .frame(minHeight: 480)
         .onChange(of: developerMode) { _, on in if !on && ui.tab == "developer" { ui.tab = "general" } }
+        .onAppear {
+            NSApp.activate(ignoringOtherApps: true)
+            DispatchQueue.main.async {
+                for window in NSApp.windows where window.title.contains("Settings") || window.identifier?.rawValue.contains("settings") == true {
+                    window.makeKeyAndOrderFront(nil)
+                    window.orderFrontRegardless()
+                }
+            }
+        }
     }
 }
 
@@ -136,8 +145,9 @@ private struct DeveloperSettings: View {
     @StateObject private var raw = SettingsUIState()
 
     var body: some View {
-        Form {
-            Section("Device") {
+        ScrollView {
+            Form {
+                Section("Device") {
                 LabeledContent("Name", value: buds.deviceName)
                 LabeledContent("Address", value: buds.address ?? "—")
                 LabeledContent("RFCOMM channel", value: buds.channelID.map(String.init) ?? "—")
@@ -235,7 +245,7 @@ private struct DeveloperSettings: View {
             }
         }
         .formStyle(.grouped)
-        .frame(minHeight: 620)
+        }
     }
 
     private func sendRaw() {

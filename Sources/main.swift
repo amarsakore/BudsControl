@@ -23,6 +23,8 @@ struct BudsControlApp: App {
         }
         .windowResizability(.contentSize)
         .windowToolbarStyle(.unified)
+        .defaultSize(width: 560, height: 600)
+        .defaultPosition(.center)
     }
 }
 

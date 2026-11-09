@@ -149,7 +149,8 @@ if args.contains("--sdp") {
 
     DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
         print("device:  \(buds.deviceName) [\(buds.productID ?? "?")] \(buds.link)")
-        print("mode:    \(buds.mode?.rawValue ?? "unknown")\(buds.level.map { " (\($0.rawValue))" } ?? "")")
+        print("mode:    \(buds.mode?.rawValue ?? "unknown")\(buds.level.map { " (\($0.rawValue))" } ?? "")"
+              + (buds.noiseBit.map { " [bit \($0)]" } ?? ""))
         print("battery: L \(buds.left?.level ?? -1)%  R \(buds.right?.level ?? -1)%  case \(buds.caseBattery?.level ?? -1)%")
         print("eq:      \(buds.eqID.map(String.init) ?? "?") \(buds.eqChoices.first { $0.id == buds.eqID }?.name ?? "")"
               + (buds.activeCustomEQ.map { " " + $0.bands.map { "\($0.hz)Hz:\($0.gain)" }.joined(separator: " ") } ?? ""))

@@ -40,7 +40,7 @@ final class AppModel: ObservableObject {
         case .transparency: buds.setMode(.transparency)
         case .off: buds.setMode(.off)
         }
-        if showHUD, let mode = buds.mode { HUD.shared.show(mode: mode, level: buds.level) }
+        if showHUD, let mode = buds.mode { HUD.shared.show(mode: mode, level: buds.level, deviceName: buds.deviceName) }
     }
 
     /// While a recorder is listening, its keys must reach it instead of firing the old shortcut.

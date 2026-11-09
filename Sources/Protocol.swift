@@ -165,8 +165,13 @@ enum NoiseLayouts {
         table[productID ?? onePlusBuds4] ?? table[onePlusBuds4]!
     }
 
+    /// Buds Pro 3 report noise modes with a different mask than the one they're set with.
+    static func reportsSeparateLayout(productID: String?, deviceName: String?) -> Bool {
+        productID == "064014" || deviceName?.lowercased().contains("buds pro 3") == true
+    }
+
     static func setLayout(for productID: String?, deviceName: String?) -> [Int: Int] {
-        if productID == "064014" || deviceName?.lowercased().contains("buds pro 3") == true {
+        if reportsSeparateLayout(productID: productID, deviceName: deviceName) {
             return budsPro3Set
         }
         return layout(for: productID)
@@ -175,7 +180,7 @@ enum NoiseLayouts {
     static func reportedMode(for mask: Int, productID: String?, deviceName: String?)
         -> (mode: NoiseMode, level: ANCLevel?)?
     {
-        if productID == "064014" || deviceName?.lowercased().contains("buds pro 3") == true {
+        if reportsSeparateLayout(productID: productID, deviceName: deviceName) {
             switch mask {
             case 0x0008: return (.off, nil)
             case 0x0100: return (.transparency, nil)

@@ -139,6 +139,9 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
     private var connectingWatchdog: DispatchWorkItem?
     private var lastPage = Date.distantPast
     private var findTimer: Timer?
+    private var channelOpenNotification: IOBluetoothUserNotification?
+    /// RFCOMM channel IDs that carry the control protocol on the current buds.
+    private var controlChannelIDs: Set<BluetoothRFCOMMChannelID> = []
 
     /// Whether to reconnect the buds to this Mac when they're around but connected elsewhere only.
     var autoConnect: () -> Bool = { UserDefaults.standard.object(forKey: "autoConnect") as? Bool ?? true }
@@ -157,12 +160,21 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
         // Reconnect as soon as the buds come back (taken out of the case, back in range).
         connectNotification = IOBluetoothDevice.register(forConnectNotifications: self,
                                                          selector: #selector(deviceDidConnect(_:device:)))
-        // After sleep the RFCOMM channel is usually dead without any close callback.
+        // After sleep the link may be dead without a close callback, or still fine. Check it: a
+        // refresh that gets no reply reconnects (expectReply), a working link is left alone.
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification,
                                                           object: nil, queue: .main) { [weak self] _ in
-            self?.log?(.info, "woke from sleep, reconnecting")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self?.reconnect() }
+            self?.log?(.info, "woke from sleep, checking the connection")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                guard let self else { return }
+                if self.link == .connected { self.refresh() } else { self.reconnect() }
+            }
         }
+        // IOBluetooth can reopen a control channel by itself when the buds come back (e.g. one from
+        // before sleep). The app must take that channel over: asking again only gets "already
+        // connected" from bluetoothd, and the open never completes.
+        channelOpenNotification = IOBluetoothRFCOMMChannel.register(forChannelOpenNotifications: self,
+                                                                    selector: #selector(channelDidOpen(_:channel:)))
     }
 
     // MARK: - Public API
@@ -341,6 +353,8 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
     /// Out of the case, the buds often reconnect only to the phone. Ask them to
     /// connect to this Mac too. At most one attempt every 15 s; each one gives up after ~5 s.
     private func pageBuds() {
+        // A request that never reported back (the buds vanished mid-page) doesn't block new ones.
+        if pageInFlight, Date().timeIntervalSince(lastPage) > 30 { pageInFlight = false }
         guard autoConnect(), !pageInFlight, Date().timeIntervalSince(lastPage) > 15 else { return }
         guard let target = pairedBuds() else { return }
         pageInFlight = true
@@ -352,6 +366,10 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
 
     /// IOBluetoothDevice async-open callback.
     @objc func connectionComplete(_ device: IOBluetoothDevice!, status: IOReturn) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { self.connectionComplete(device, status: status) }
+            return
+        }
         pageInFlight = false
         if status != kIOReturnSuccess { log?(.info, "buds not reachable (\(String(format: "0x%08x", status)))") }
         // On success the connect notification takes it from here.
@@ -411,6 +429,7 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
             buds.performSDPQuery(nil)  // refresh the records for the next attempt
         }
         pendingChannels = channels
+        controlChannelIDs = Set(channels)
         openNextChannel()
     }
 
@@ -430,9 +449,19 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
         }
         if result == kIOReturnSuccess, let ch {
             channel = ch
+            if ch.isOpen() {
+                log?(.info, "channel \(id) is already open, using it")
+                adopt(ch)
+                return
+            }
             // Some channels never answer; give up on this one after a few seconds.
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
                 guard let self, self.channel === ch, self.link == .connecting else { return }
+                if ch.isOpen() {
+                    self.log?(.info, "channel \(id) opened without telling us, using it")
+                    self.adopt(ch)
+                    return
+                }
                 self.log?(.info, "channel \(id) timed out")
                 self.closeChannel()
                 self.link = .searching
@@ -494,6 +523,10 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
     }
 
     @objc private func deviceDidConnect(_ note: IOBluetoothUserNotification, device: IOBluetoothDevice) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { self.deviceDidConnect(note, device: device) }
+            return
+        }
         guard Self.looksLikeBuds(device), channel == nil else { return }
         log?(.info, "\(device.name ?? "buds") connected to Mac")
         retryCount = 0
@@ -504,6 +537,10 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
     }
 
     @objc private func deviceDidDisconnect(_ note: IOBluetoothUserNotification, device: IOBluetoothDevice) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { self.deviceDidDisconnect(note, device: device) }
+            return
+        }
         log?(.info, "\(device.name ?? "buds") disconnected from Mac")
         closeChannel()
         left = nil; right = nil; caseBattery = nil
@@ -514,6 +551,11 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
     // MARK: - IOBluetoothRFCOMMChannelDelegate
 
     func rfcommChannelOpenComplete(_ rfcommChannel: IOBluetoothRFCOMMChannel!, status error: IOReturn) {
+        guard Thread.isMainThread else {
+            let channel = rfcommChannel
+            DispatchQueue.main.async { self.rfcommChannelOpenComplete(channel, status: error) }
+            return
+        }
         // The completion can arrive before openRFCOMMChannelAsync has handed us the channel
         // (e.g. when it was already open); dropping it left the app stuck on "Connecting…".
         if channel == nil, link == .connecting, rfcommChannel.getID() == openingChannelID {
@@ -526,6 +568,12 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
             openNextChannel()
             return
         }
+        didOpen(rfcommChannel)
+    }
+
+    /// The channel is open: start talking to the buds.
+    private func didOpen(_ rfcommChannel: IOBluetoothRFCOMMChannel) {
+        guard !(link == .connected && channelID == rfcommChannel.getID()) else { return }
         log?(.info, "connected on channel \(rfcommChannel.getID())")
         channelID = rfcommChannel.getID()
         link = .connected
@@ -549,7 +597,29 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
         refresh()
     }
 
+    /// Takes over an already-open control channel (ours, or one IOBluetooth reopened by itself).
+    private func adopt(_ opened: IOBluetoothRFCOMMChannel) {
+        if let current = channel, current !== opened { current.setDelegate(nil) }  // same link; don't close it
+        opened.setDelegate(self)
+        channel = opened
+        didOpen(opened)
+    }
+
+    @objc private func channelDidOpen(_ note: IOBluetoothUserNotification, channel opened: IOBluetoothRFCOMMChannel) {
+        DispatchQueue.main.async { [self] in
+            guard link != .connected, opened.isOpen(), controlChannelIDs.contains(opened.getID()),
+                  let device, opened.getDevice()?.addressString == device.addressString else { return }
+            log?(.info, "channel \(opened.getID()) was opened for us, using it")
+            adopt(opened)
+        }
+    }
+
     func rfcommChannelClosed(_ rfcommChannel: IOBluetoothRFCOMMChannel!) {
+        guard Thread.isMainThread else {
+            let channel = rfcommChannel
+            DispatchQueue.main.async { self.rfcommChannelClosed(channel) }
+            return
+        }
         guard rfcommChannel === channel else { return }
         log?(.info, "channel closed")
         closeChannel()
@@ -557,8 +627,16 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
     }
 
     func rfcommChannelData(_ rfcommChannel: IOBluetoothRFCOMMChannel!, data dataPointer: UnsafeMutableRawPointer!, length dataLength: Int) {
-        lastReceived = Date()
         let bytes = Array(UnsafeBufferPointer(start: dataPointer.assumingMemoryBound(to: UInt8.self), count: dataLength))
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { self.received(bytes) }
+            return
+        }
+        received(bytes)
+    }
+
+    private func received(_ bytes: [UInt8]) {
+        lastReceived = Date()
         log?(.received, hex(bytes))
         for frame in parser.feed(bytes) { handle(frame) }
     }

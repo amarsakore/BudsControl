@@ -156,6 +156,10 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
     /// the old mode, so they're dropped instead of flipping the UI back for a moment.
     private var outstandingNoiseQueries: Set<UInt8> = []
     private var staleNoiseQueries: Set<UInt8> = []
+    /// In-flight EQ changes awaiting confirmation from the buds.
+    private var pendingEQID: UInt8?
+    private var eqGeneration: Int = 0
+    private var eqWatchdog: DispatchWorkItem?
     /// A mode change requested while the link was down; sent as soon as it comes up.
     private var queuedMode: (NoiseMode, ANCLevel?)?
 
@@ -281,8 +285,26 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
         expectReply()
     }
 
+    /// Waits for the buds to confirm `id`: a 0x0504 push or a matching read-back clears it;
+    /// otherwise re-read after 1.2 s and take whatever the buds report.
+    private func expectEQ(_ id: UInt8, list: Bool = false) {
+        pendingEQID = id
+        eqGeneration &+= 1
+        let gen = eqGeneration
+        eqWatchdog?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.eqGeneration == gen else { return }
+            self.pendingEQID = nil
+            self.send(Command.eqQuery)
+            if list { self.send(Command.eqListQuery, [0x01, 0x05]) }
+        }
+        eqWatchdog = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: work)
+    }
+
     func setEQ(_ id: UInt8) {
         eqID = id
+        expectEQ(id)
         send(Command.setEQ, [id])
         expectReply()
     }
@@ -297,6 +319,7 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
         }
         customEQs[index] = eq
         eqID = eq.id
+        expectEQ(eq.id, list: true)
         let name = Array(eq.name.utf8.prefix(255))
         var payload: [UInt8] = [0x02, UInt8(bitPattern: Int8(eq.minGain)), UInt8(bitPattern: Int8(eq.maxGain)), eq.id,
                                 UInt8(name.count)]
@@ -491,6 +514,8 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
         parser = FrameParser()
         outstandingNoiseQueries = []
         staleNoiseQueries = []
+        pendingEQID = nil
+        eqWatchdog?.cancel()
         if link != .searching { link = .searching }
     }
 
@@ -704,14 +729,39 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
         case Command.switchQuery | 0x8000:
             parseSwitches(p)
         case Command.eqQuery | 0x8000:
-            if p.count >= 2, p[0] == 0 { eqID = p[1] }
+            if p.count >= 2, p[0] == 0 {
+                let reported = p[1]
+                if let pending = pendingEQID {
+                    if reported == pending {
+                        // Hardware confirmed our requested preset
+                        pendingEQID = nil
+                        eqWatchdog?.cancel()
+                        eqID = reported
+                    }
+                    // Otherwise: stale response during DSP transition, ignore it
+                } else {
+                    // No transition pending: accept truth
+                    eqID = reported
+                }
+            }
         case Command.eqListQuery | 0x8000:
             parseEQList(p)
         case Command.setEQ | 0x8000, Command.setCustomEQ | 0x8000:
-            // Read back what the buds actually applied.
-            if p.first != 0 { log?(.info, "EQ change rejected: \(hex(p))") }
-            send(Command.eqQuery)
-            send(Command.eqListQuery, [0x01, 0x05])
+            let custom = (frame.command & ~0x8000) == Command.setCustomEQ
+            if p.first != 0 {
+                log?(.info, "\(custom ? "custom " : "")EQ change rejected: \(hex(p))")
+                eqWatchdog?.cancel()
+                pendingEQID = nil
+                send(Command.eqQuery)
+                if custom { send(Command.eqListQuery, [0x01, 0x05]) }
+            } else {
+                let gen = eqGeneration
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    guard let self, self.link == .connected, self.eqGeneration == gen else { return }
+                    if self.pendingEQID != nil { self.send(Command.eqQuery) }
+                    if custom { self.send(Command.eqListQuery, [0x01, 0x05]) }
+                }
+            }
         case Command.gestureQuery | 0x8000:
             parseGestures(p)
         case Command.setGesture | 0x8000:
@@ -731,6 +781,21 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
             parseWear(p)
         case Command.statusPush:
             handlePush(p)
+        case Command.eqPush:
+            if let id = p.first {
+                log?(.info, "EQ push: preset \(id)")
+                if let pending = pendingEQID {
+                    // Drop late push events from previous selections
+                    if id == pending {
+                        eqWatchdog?.cancel()
+                        pendingEQID = nil
+                        eqID = id
+                    }
+                } else {
+                    // External change (stem gesture or phone app)
+                    eqID = id
+                }
+            }
         default:
             break
         }
@@ -785,6 +850,9 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
         left = nil; right = nil; caseBattery = nil
         gameMode = nil
         eqID = nil
+        pendingEQID = nil
+        eqGeneration &+= 1
+        eqWatchdog?.cancel()
         customEQs = []
         gestures = [:]
         hosts = []

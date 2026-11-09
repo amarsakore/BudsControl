@@ -145,6 +145,12 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
 
     /// Whether to reconnect the buds to this Mac when they're around but connected elsewhere only.
     var autoConnect: () -> Bool = { UserDefaults.standard.object(forKey: "autoConnect") as? Bool ?? true }
+    /// Whether to put back the noise mode and low latency last picked in the app when the buds connect.
+    var rememberSettings: () -> Bool = { UserDefaults.standard.bool(forKey: "rememberSettings") }
+    /// Set when the link comes up; cleared once the buds' first reading has been checked against
+    /// the remembered settings.
+    private var restoreNoise = false
+    private var restoreLowLatency = false
 
     /// Noise queries still in flight. Answers to queries sent before the latest mode change describe
     /// the old mode, so they're dropped instead of flipping the UI back for a moment.
@@ -240,6 +246,7 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
         }
         self.mode = mode
         self.level = mode == .anc ? level : nil
+        remember { $0.mode = mode.rawValue; $0.level = level?.rawValue }
         setNoiseBit(bit)
     }
 
@@ -269,6 +276,7 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
     /// Developer: low-latency "game mode" switch (misc config 0x06).
     func setGameMode(_ on: Bool) {
         gameMode = on
+        remember { $0.lowLatency = on }
         send(Command.setSwitch, [Feature.lowLatency, on ? 1 : 0])
         expectReply()
     }
@@ -581,6 +589,9 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
         disconnectNotification?.unregister()
         disconnectNotification = device?.register(forDisconnectNotification: self,
                                                   selector: #selector(deviceDidDisconnect(_:device:)))
+        // A mode picked while disconnected is newer than the remembered one, so it wins.
+        restoreNoise = rememberSettings() && queuedMode == nil
+        restoreLowLatency = rememberSettings()
         send(Command.hello)
         send(Command.productID)
         // A mode requested while disconnected waits for the product ID, so it uses the right layout.
@@ -684,8 +695,12 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
             if p.first != 0 { log?(.info, "mode change rejected: \(hex(p))") }
             queryNoise()
         case Command.setSwitch | 0x8000:
-            if p.first != 0 { log?(.info, "switch rejected: \(hex(p))") }
-            send(Command.switchQuery, [0x01, Feature.lowLatency])
+            // An accepted switch is confirmed by a push about half a second later; reading it back
+            // straight away still returns the old value and flicks the toggle. Re-read only on refusal.
+            if p.first != 0 {
+                log?(.info, "switch rejected: \(hex(p))")
+                send(Command.switchQuery, [0x01, Feature.lowLatency])
+            }
         case Command.switchQuery | 0x8000:
             parseSwitches(p)
         case Command.eqQuery | 0x8000:
@@ -781,6 +796,59 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
         setMode(mode, level: level)
     }
 
+    // MARK: - Remembered settings
+
+    /// The noise mode and low latency last picked in the app, per pair of buds. Only picks made here
+    /// count: the buds report Off on their way into the case, which mustn't be what comes back.
+    private struct Remembered: Codable {
+        var mode: String?
+        var level: String?
+        var lowLatency: Bool?
+    }
+
+    private static let rememberedKey = "rememberedSettings"
+
+    private func remember(_ change: (inout Remembered) -> Void) {
+        guard let key = device?.addressString else { return }
+        var all = Self.loadRemembered()
+        change(&all[key, default: Remembered()])
+        UserDefaults.standard.set(try? JSONEncoder().encode(all), forKey: Self.rememberedKey)
+    }
+
+    private static func loadRemembered() -> [String: Remembered] {
+        UserDefaults.standard.data(forKey: rememberedKey)
+            .flatMap { try? JSONDecoder().decode([String: Remembered].self, from: $0) } ?? [:]
+    }
+
+    /// Once the buds have said what they're set to, changes back only what differs from the
+    /// remembered settings, so a link that comes back as it was sends nothing.
+    private func restoreSettings() {
+        guard restoreNoise || restoreLowLatency else { return }
+        guard link == .connected, let key = device?.addressString,
+              let saved = Self.loadRemembered()[key] else {
+            restoreNoise = false
+            restoreLowLatency = false
+            return
+        }
+        if restoreNoise, let current = mode {
+            restoreNoise = false
+            if let savedMode = saved.mode.flatMap(NoiseMode.init(rawValue:)), availableModes.contains(savedMode) {
+                let savedLevel = saved.level.flatMap(ANCLevel.init(rawValue:)).flatMap { availableLevels.contains($0) ? $0 : nil }
+                if savedMode != current || (savedMode == .anc && savedLevel != nil && savedLevel != level) {
+                    log?(.info, "restoring \(savedMode.rawValue)\(savedLevel.map { " (\($0.rawValue))" } ?? "")")
+                    setMode(savedMode, level: savedLevel)
+                }
+            }
+        }
+        if restoreLowLatency, let current = gameMode {
+            restoreLowLatency = false
+            if let on = saved.lowLatency, on != current, supports(.lowLatency) {
+                log?(.info, "restoring low latency \(on ? "on" : "off")")
+                setGameMode(on)
+            }
+        }
+    }
+
     /// Payload: <status> <count> (<feature id> <0 off | 1 on>)*
     private func parseSwitches(_ p: [UInt8]) {
         guard p.count >= 2, p[0] == 0 else { return }
@@ -789,6 +857,7 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
             if p[i] == Feature.lowLatency { gameMode = p[i + 1] == 1 }
             i += 2
         }
+        restoreSettings()
     }
 
     /// Payload: <status> <count> (<selected> <min dB> <max dB> <id> <name len> <name> <band count>
@@ -863,6 +932,7 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
             noiseBit = bit
             mode = ModeType.mode(type)
             level = ANCLevel(modeType: type) ?? (mode == .anc ? level : nil)
+            restoreSettings()
             return
         }
     }

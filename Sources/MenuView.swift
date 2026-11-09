@@ -66,7 +66,9 @@ struct MenuView: View {
                         size: 34)
             VStack(alignment: .leading, spacing: 0) {
                 Text(buds.deviceName).font(.subheadline.weight(.semibold)).lineLimit(1)
+                    .minimumScaleFactor(0.85)  // long custom Bluetooth names
                 Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    .minimumScaleFactor(0.85)
                     .contentTransition(.opacity)
             }
             Spacer(minLength: 0)
@@ -98,8 +100,11 @@ struct MenuView: View {
     private var subtitle: String {
         switch buds.link {
         case .connected:
-            if let level = buds.budsBattery { return "\(level)% · \(buds.mode?.title ?? "Connected")" }
-            return buds.mode?.title ?? "Connected"
+            // Short form ("ANC · Max"): the header shares its row with two buttons, and
+            // "Noise Cancellation" doesn't fit there.
+            var status = buds.mode?.shortTitle ?? "Connected"
+            if buds.mode == .anc, let level = buds.level { status += " · \(level.title)" }
+            return buds.budsBattery.map { "\($0)% · \(status)" } ?? status
         case .connecting: return "Connecting…"
         case .searching: return "Not connected"
         }

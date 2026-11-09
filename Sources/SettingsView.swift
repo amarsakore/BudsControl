@@ -7,16 +7,24 @@ struct SettingsView: View {
 
     var body: some View {
         TabView(selection: $ui.tab) {
-            Tab("General", systemImage: "gearshape", value: "general") {
-                GeneralSettings(model: model, buds: model.buds)
-            }
-            Tab("Shortcuts", systemImage: "keyboard", value: "shortcuts") {
-                ShortcutSettings(model: model)
-            }
-            if developerMode {
-                Tab("Developer", systemImage: "hammer", value: "developer") {
-                    DeveloperSettings(buds: model.buds, log: model.packets)
+            GeneralSettings(model: model, buds: model.buds)
+                .tabItem {
+                    Label("General", systemImage: "gearshape")
                 }
+                .tag("general")
+
+            ShortcutSettings(model: model)
+                .tabItem {
+                    Label("Shortcuts", systemImage: "keyboard")
+                }
+                .tag("shortcuts")
+
+            if developerMode {
+                DeveloperSettings(buds: model.buds, log: model.packets)
+                    .tabItem {
+                        Label("Developer", systemImage: "hammer")
+                    }
+                    .tag("developer")
             }
         }
         .frame(width: 560)
@@ -41,7 +49,7 @@ private struct GeneralSettings: View {
                     Image(systemName: "airpodspro")
                         .font(.system(size: 26))
                         .frame(width: 52, height: 52)
-                        .glassEffect(.regular, in: .circle)
+                        .circleGlass()
                     VStack(alignment: .leading, spacing: 2) {
                         Text(buds.deviceName).font(.headline)
                         Text(status).font(.subheadline).foregroundStyle(.secondary)

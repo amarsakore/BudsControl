@@ -64,7 +64,7 @@ private struct HUDView: View {
             Image(systemName: mode.symbol)
                 .font(.system(size: 24, weight: .medium))
                 .frame(width: 44, height: 44)
-                .glassEffect(.regular.tint(mode == .off ? .clear : .accentColor), in: .circle)
+                .tintedCircleGlass(mode == .off ? nil : .accentColor)
             VStack(alignment: .leading, spacing: 2) {
                 Text(mode.title).font(.headline)
                 Text(level.map { "\($0.title) level" } ?? "OnePlus Buds")
@@ -75,7 +75,7 @@ private struct HUDView: View {
         .padding(.leading, 12)
         .padding(.trailing, 24)
         .padding(.vertical, 12)
-        .glassEffect(.regular, in: .capsule)
+        .capsuleGlass()
         .padding(20)  // room for the glass edge highlight
     }
 }

@@ -73,7 +73,7 @@ struct MenuView: View {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 11, weight: .semibold))
                     .frame(width: 24, height: 24)
-                    .glassEffect(.regular.interactive(), in: .circle)
+                    .circleGlass(interactive: true)
             }
             .menuStyle(.button)
             .menuIndicator(.hidden)
@@ -155,7 +155,7 @@ struct MenuView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .glassEffect(.regular, in: .rect(cornerRadius: 14))
+        .roundedRectGlass(cornerRadius: 14)
     }
 
     private func openSettings() {

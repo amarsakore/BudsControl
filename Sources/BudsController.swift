@@ -27,7 +27,7 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
     @Published private(set) var link: LinkState = .searching {
         didSet { if link == .connecting && oldValue != .connecting { armConnectingWatchdog() } }
     }
-    @Published private(set) var deviceName = "OnePlus Buds"
+    @Published private(set) var deviceName = "Earbuds"
     @Published private(set) var productID: String?
     @Published private(set) var mode: NoiseMode?
     @Published private(set) var level: ANCLevel? {
@@ -590,7 +590,7 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
             if p.count >= 4, p[0] == 0 {
                 let pid = String(format: "%02X%02X%02X", p[3], p[2], p[1])
                 productID = pid
-                if !model.name.isEmpty, device?.name == nil { deviceName = model.name }
+                if !model.name.isEmpty, device?.name == nil || deviceName == "Earbuds" || deviceName == "OnePlus Buds" { deviceName = model.name }
                 applyQueuedMode()
             }
         case Command.hello | 0x8000:

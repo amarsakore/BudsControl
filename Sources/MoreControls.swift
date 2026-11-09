@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// The expandable "More" part of the popover: equalizer, low latency, find my earbuds, gestures.
@@ -21,7 +22,7 @@ struct MoreControls: View {
         let current = choices.first { $0.id == buds.eqID }
         if buds.supports(.equalizer) {
             Card(title: "Equalizer", symbol: "slider.vertical.3") {
-                if choices.count <= 3 {
+                if Self.namesFitAsButtons(choices.map(\.name)) {
                     LiquidSegmented(items: choices, selection: current, height: 22,
                                     onSelect: { buds.setEQ($0.id) }, label: { preset, selected in
                         Text(preset.name)
@@ -31,7 +32,7 @@ struct MoreControls: View {
                             .minimumScaleFactor(0.8)  // last resort if the labels can't all fit
                     }, fitToLabels: true)
                 } else {
-                    // Four or more presets: a row of chips cannot fit in the popover without truncating.
+                    // Long names ("Pure vocals") or 5+ presets: a row of buttons would cut them off.
                     PickerRow(title: "Preset", value: current?.name ?? "—",
                               options: choices.map { ($0.name, nil) }) { index in buds.setEQ(choices[index].id) }
                 }
@@ -41,6 +42,17 @@ struct MoreControls: View {
                 }
             }
         }
+    }
+
+    /// Buttons when every preset name fits on one row of the popover (Balanced / Vocal / Bass /
+    /// Custom does), otherwise a dropdown. Measured at the selected (semibold) weight, with each
+    /// button's 8 pt side padding, against the row's 206 pt (256 popover − 24 − 20 card − 6 track).
+    private static func namesFitAsButtons(_ names: [String]) -> Bool {
+        guard names.count <= 4 else { return false }
+        let size = NSFont.preferredFont(forTextStyle: .caption2).pointSize
+        let font = NSFont.systemFont(ofSize: size, weight: .semibold)
+        let needed = names.reduce(0) { $0 + ($1 as NSString).size(withAttributes: [.font: font]).width + 16 }
+        return needed <= 206
     }
 
     // MARK: Low latency

@@ -10,10 +10,10 @@ on OnePlus Buds 4, without the phone app.</p>
 ## Features
 
 - **One-click noise control:** Off, Transparency and Noise Cancellation, plus the ANC levels
-  (Smart, Max, Moderate, Mild), in a compact Liquid Glass popover.
+  (Smart, Max, Moderate, Mild), in a compact popover (Liquid Glass on macOS 26, plain materials on 14–15).
 - **Battery at a glance:** the menu bar icon is ringed by the earbuds' battery level; the popover shows
   left, right and case.
-- **More controls** behind the ⌄ arrow:
+- **More controls** behind the ⌄ button next to •••:
   - **Equalizer:** the built-in presets (Balanced, Vocal, Bass) and your custom EQ, with six band sliders
   - **Low latency** mode for games and video
   - **Find my earbuds:** play a loud sound to locate them
@@ -106,6 +106,19 @@ On the Buds 4, mask bit 0 is off, bit 1 is ANC, bit 2 is transparency, bit 4 is 
 bit 6 is mild and bit 7 is smart.
 
 ## Credits
+
+### Contributors
+
+Thank you to everyone who has improved Buds Control:
+
+- **Lohith Srikar** ([@lsrik19](https://github.com/lsrik19)): macOS 14 Sonoma and 15 Sequoia support, with
+  fallbacks for the Liquid Glass effects ([#2](https://github.com/amarsakore/BudsControl/pull/2))
+- **Bhanu** ([@WinShell-Bhanu](https://github.com/WinShell-Bhanu)): OnePlus Buds Pro 3 compatibility, with their
+  separate noise-mode layout and extra service lookup ([#3](https://github.com/amarsakore/BudsControl/pull/3))
+
+Pull requests are welcome, especially support for more OnePlus and OPPO models.
+
+### Protocol references
 
 - The per-model noise-mode bit layouts and the RFCOMM framing come from the
   [`oppo-pods` plugin](https://github.com/noctalia-dev/community-plugins/tree/main/oppo-pods)

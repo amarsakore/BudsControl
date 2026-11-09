@@ -116,6 +116,7 @@ such as the multipoint device list. Replies use the request command with the hig
 | `0x0108` / `0x0401 [01 side 01 gesture action]` | read / set touch gestures |
 | `0x010D [n ids…]` / `0x0403 [id on]` | read / set on-off features (`06` = low latency) |
 | `0x010F` / `0x0406 [id]` | read / set the EQ preset |
+| `0x0504 [id]` | push from the buds when the EQ preset changes |
 | `0x0122 [01 05]` / `0x0418 [02 …]` | list / rewrite custom EQs (bands as Hz + gain) |
 | `0x0400 [01 \| 00]` | start / stop the find-my-earbuds sound |
 | `0x0404 [01 01 <mask>]` | set noise mode |
@@ -133,7 +134,8 @@ Thank you to everyone who has improved Buds Control:
 
 - **Lohith Srikar** ([@lsrik19](https://github.com/lsrik19)): macOS 14 Sonoma and 15 Sequoia support, with
   fallbacks for the Liquid Glass effects ([#2](https://github.com/amarsakore/BudsControl/pull/2)); parsing
-  of long messages from the buds and fixes for the Settings window ([#7](https://github.com/amarsakore/BudsControl/pull/7))
+  of long messages from the buds and fixes for the Settings window ([#7](https://github.com/amarsakore/BudsControl/pull/7));
+  steadier EQ switching and live EQ updates from the buds ([#11](https://github.com/amarsakore/BudsControl/pull/11))
 - **Bhanu** ([@WinShell-Bhanu](https://github.com/WinShell-Bhanu)): OnePlus Buds Pro 3 compatibility, with their
   separate noise-mode layout and extra service lookup ([#3](https://github.com/amarsakore/BudsControl/pull/3))
 

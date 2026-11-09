@@ -54,6 +54,7 @@ struct Frame {
 }
 
 /// Accumulates bytes from the RFCOMM channel and splits them into frames.
+/// Handles LEB128 multi-byte frame lengths for bulk packets (e.g. multipoint device lists).
 struct FrameParser {
     private var buffer: [UInt8] = []
 
@@ -63,13 +64,35 @@ struct FrameParser {
         var i = 0
         while i < buffer.count {
             guard buffer[i] == 0xAA else { i += 1; continue }
-            guard i + 9 <= buffer.count else { break }
-            let cmd = UInt16(buffer[i + 4]) | UInt16(buffer[i + 5]) << 8
-            let payloadLen = Int(buffer[i + 7]) | Int(buffer[i + 8]) << 8
-            let end = i + 9 + payloadLen
-            guard end <= buffer.count else { break }
-            frames.append(Frame(command: cmd, seq: buffer[i + 6], payload: Array(buffer[(i + 9)..<end])))
-            i = end
+            var pos = i + 1
+            var totalLen = 0
+            var shift = 0
+            var complete = false
+            while pos < buffer.count {
+                let byte = buffer[pos]
+                totalLen |= Int(byte & 0x7F) << shift
+                pos += 1
+                if byte & 0x80 == 0 {
+                    complete = true
+                    break
+                }
+                shift += 7
+                if shift > 21 { break }
+            }
+            guard complete else { break }
+            let frameEnd = pos + totalLen
+            guard frameEnd <= buffer.count else { break }
+
+            let headerOffset = pos + 2
+            if headerOffset + 5 <= frameEnd {
+                let cmd = UInt16(buffer[headerOffset]) | (UInt16(buffer[headerOffset + 1]) << 8)
+                let seq = buffer[headerOffset + 2]
+                let payloadLen = Int(buffer[headerOffset + 3]) | (Int(buffer[headerOffset + 4]) << 8)
+                let payloadStart = headerOffset + 5
+                let payloadEnd = min(payloadStart + payloadLen, frameEnd)
+                frames.append(Frame(command: cmd, seq: seq, payload: Array(buffer[payloadStart..<payloadEnd])))
+            }
+            i = frameEnd
         }
         buffer.removeFirst(min(i, buffer.count))
         return frames

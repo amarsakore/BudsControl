@@ -42,7 +42,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>NSBluetoothAlwaysUsageDescription</key>
-    <string>Buds Control talks to your OnePlus Buds to switch noise cancellation and transparency.</string>
+    <string>Buds Control talks to your earbuds to switch noise cancellation, equalizer, and settings.</string>
 </dict>
 </plist>
 PLIST

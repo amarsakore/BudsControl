@@ -21,7 +21,7 @@ struct MoreControls: View {
         let current = choices.first { $0.id == buds.eqID }
         if buds.supports(.equalizer) {
             Card(title: "Equalizer", symbol: "slider.vertical.3") {
-                if choices.count <= 4 {
+                if choices.count <= 3 {
                     LiquidSegmented(items: choices, selection: current, height: 22,
                                     onSelect: { buds.setEQ($0.id) }, label: { preset, selected in
                         Text(preset.name)
@@ -31,7 +31,7 @@ struct MoreControls: View {
                             .minimumScaleFactor(0.8)  // last resort if the labels can't all fit
                     }, fitToLabels: true)
                 } else {
-                    // Some models have five or more presets: a row of chips would be unreadable.
+                    // Four or more presets: a row of chips cannot fit in the popover without truncating.
                     PickerRow(title: "Preset", value: current?.name ?? "—",
                               options: choices.map { ($0.name, nil) }) { index in buds.setEQ(choices[index].id) }
                 }

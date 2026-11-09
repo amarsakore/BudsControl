@@ -9,8 +9,9 @@ on OnePlus, Oppo, Realme buds without the phone app.</p>
 
 ## Features
 
-- **One-click noise control:** Off, Transparency and Noise Cancellation, plus the ANC levels
-  (Smart, Max, Moderate, Mild), in a compact popover (Liquid Glass on macOS 26, plain materials on 14–15).
+- **One-click noise control:** Off, Transparency and Noise Cancellation, plus the ANC levels your model
+  has (Smart, Max, Moderate, Mild, Adaptive), in a compact popover (Liquid Glass on macOS 26, plain
+  materials on 14–15).
 - **Battery at a glance:** the menu bar icon is ringed by the earbuds' battery level; the popover shows
   left, right and case.
 - **More controls** behind the ⌄ button next to •••:
@@ -22,6 +23,8 @@ on OnePlus, Oppo, Realme buds without the phone app.</p>
   No Accessibility permission needed.
 - **Automatic reconnect:** when the buds come out of the case and only rejoin your phone, Buds Control
   brings them back to the Mac and reconnects within a few seconds.
+- **Remember settings:** optionally puts back the noise mode and low latency you last picked whenever the
+  buds connect, since the buds reset them on their own (for example after going back in the case).
 - **Developer options:** a live packet log, raw commands, every noise-mode bit the model supports,
   game mode, and the list of devices the buds are paired with.
 
@@ -72,7 +75,8 @@ To start it at login, turn on **Launch at login** in Buds Control's settings.
 ## Usage
 
 Click the earbuds icon in the menu bar. The ••• menu has **Settings…**, where you can set shortcuts,
-launch at login, automatic reconnect, the HUD, and developer options.
+launch at login, automatic reconnect, remembering settings between connections, the HUD, and developer
+options.
 
 ### Command line
 
@@ -95,7 +99,9 @@ the Buds 4). Buds Control opens it with IOBluetooth and exchanges small frames:
 AA <len> 00 00 <command, 16-bit LE> <seq> <payload length, 16-bit LE> <payload…>
 ```
 
-Replies use the request command with the high bit set (`0x0106` → `0x8106`).
+`<len>` counts the bytes after it and is a LEB128 varint: one byte for most frames, more for long ones
+such as the multipoint device list. Replies use the request command with the high bit set
+(`0x0106` → `0x8106`).
 
 | Command | Purpose |
 |---|---|
@@ -114,8 +120,10 @@ Replies use the request command with the high bit set (`0x0106` → `0x8106`).
 | `0x0400 [01 \| 00]` | start / stop the find-my-earbuds sound |
 | `0x0404 [01 01 <mask>]` | set noise mode |
 
-On the Buds 4, mask bit 0 is off, bit 1 is ANC, bit 2 is transparency, bit 4 is max, bit 5 is moderate,
-bit 6 is mild and bit 7 is smart.
+On the Buds 4, mask bit 0 is off, bit 1 is ANC, bit 2 is transparency, bit 4 is max, bit 5 is moderate, bit 6 is mild,
+bit 7 is smart and bit 11 is adaptive. The buds report some modes with a different bit than the one used to
+set them (transparency comes back as bit 8, off as bit 3), and the layout differs between models; the
+device catalog has each model's.
 
 ## Credits
 
@@ -124,7 +132,8 @@ bit 6 is mild and bit 7 is smart.
 Thank you to everyone who has improved Buds Control:
 
 - **Lohith Srikar** ([@lsrik19](https://github.com/lsrik19)): macOS 14 Sonoma and 15 Sequoia support, with
-  fallbacks for the Liquid Glass effects ([#2](https://github.com/amarsakore/BudsControl/pull/2))
+  fallbacks for the Liquid Glass effects ([#2](https://github.com/amarsakore/BudsControl/pull/2)); parsing
+  of long messages from the buds and fixes for the Settings window ([#7](https://github.com/amarsakore/BudsControl/pull/7))
 - **Bhanu** ([@WinShell-Bhanu](https://github.com/WinShell-Bhanu)): OnePlus Buds Pro 3 compatibility, with their
   separate noise-mode layout and extra service lookup ([#3](https://github.com/amarsakore/BudsControl/pull/3))
 

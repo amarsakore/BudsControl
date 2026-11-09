@@ -50,6 +50,7 @@ private struct GeneralSettings: View {
     @AppStorage("showHUD") private var showHUD = true
     @AppStorage("developerMode") private var developerMode = false
     @AppStorage("autoConnect") private var autoConnect = true
+    @AppStorage("rememberSettings") private var rememberSettings = false
 
     var body: some View {
         Form {
@@ -76,6 +77,10 @@ private struct GeneralSettings: View {
                 Toggle(isOn: $autoConnect) {
                     Text("Reconnect buds to this Mac automatically")
                     Text("When the buds come out of the case and only join your phone, bring them back here too.")
+                }
+                Toggle(isOn: $rememberSettings) {
+                    Text("Remember settings between connections")
+                    Text("When the buds connect, put back the noise mode and low latency you last picked in Buds Control.")
                 }
                 Toggle("Show HUD when a shortcut changes mode", isOn: $showHUD)
             }

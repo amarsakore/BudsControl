@@ -27,6 +27,7 @@ enum Command {
     static let eqListQuery: UInt16 = 0x0122
     static let setEQ: UInt16 = 0x0406
     static let setCustomEQ: UInt16 = 0x0418
+    static let eqPush: UInt16 = 0x0504
 }
 
 /// On/off features set with 0x0403 [id, on] and read with 0x010D [count, ids...].

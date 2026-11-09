@@ -11,15 +11,18 @@ struct MenuView: View {
             VStack(spacing: 10) {
                 header
                 if buds.link == .connected {
-                    modes
-                    if buds.mode == .anc, !buds.availableLevels.isEmpty {
-                        levels.transition(.blurReplace)
+                    // Only what this model has: no noise control at all on buds without ANC.
+                    if buds.supports(.noiseControl) {
+                        modes
+                        if buds.mode == .anc, !buds.availableLevels.isEmpty {
+                            levels.transition(.blurReplace)
+                        }
                     }
                     // Own stack with no spacing: the gap above the panel is part of the panel, so a
                     // folded panel leaves no extra space under the battery row.
                     VStack(spacing: 0) {
                         batteries
-                        Collapsible(expanded: moreExpanded) {
+                        Collapsible(expanded: moreExpanded && buds.hasMoreControls) {
                             MoreControls(buds: buds).padding(.top, 10)
                         }
                     }
@@ -68,7 +71,7 @@ struct MenuView: View {
             }
             Spacer(minLength: 0)
             HStack(spacing: 6) {
-                if buds.link == .connected { moreToggle }
+                if buds.link == .connected, buds.hasMoreControls { moreToggle }
                 menu
             }
         }
@@ -105,7 +108,7 @@ struct MenuView: View {
     // MARK: Modes and levels — lens-style segmented controls (see LiquidSegmented)
 
     private var modes: some View {
-        LiquidSegmented(items: [NoiseMode.off, .transparency, .anc], selection: buds.mode,
+        LiquidSegmented(items: buds.availableModes, selection: buds.mode,
                         onSelect: { buds.setMode($0) }) { mode, selected in
             HStack(spacing: 5) {
                 Image(systemName: mode.symbol)
@@ -132,6 +135,7 @@ struct MenuView: View {
                 .font(.caption2.weight(selected ? .semibold : .medium))
                 .foregroundStyle(selected ? Color.primary : Color.secondary)
                 .lineLimit(1)
+                .minimumScaleFactor(0.8)  // five levels (with Adaptive) are a tight fit
         }, fitToLabels: true)
     }
 

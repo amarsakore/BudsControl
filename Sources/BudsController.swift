@@ -112,6 +112,8 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
 
     override init() {
         super.init()
+        // Show the buds' Bluetooth name straight away, even before they connect.
+        if let name = pairedBuds()?.name { deviceName = name }
         // Reconnect as soon as the buds come back (taken out of the case, back in range).
         connectNotification = IOBluetoothDevice.register(forConnectNotifications: self,
                                                          selector: #selector(deviceDidConnect(_:device:)))
@@ -153,6 +155,8 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
 
     func refresh() {
         guard link == .connected else { return }
+        // Pick up a rename made in System Settings › Bluetooth while connected.
+        if let name = device?.name, name != deviceName { deviceName = name }
         send(Command.battery)
         queryNoise()
         expectReply()
@@ -279,13 +283,18 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
         return paired.first { Self.looksLikeBuds($0) && $0.isConnected() }
     }
 
+    /// The buds this Mac last talked to, or any paired buds; connected or not.
+    private func pairedBuds() -> IOBluetoothDevice? {
+        let paired = ((IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice]) ?? []).filter(Self.looksLikeBuds)
+        let last = UserDefaults.standard.string(forKey: "lastBudsAddress")
+        return paired.first { $0.addressString == last } ?? paired.first
+    }
+
     /// Out of the case, the buds often reconnect only to the phone. Ask them to
     /// connect to this Mac too. At most one attempt every 15 s; each one gives up after ~5 s.
     private func pageBuds() {
         guard autoConnect(), !pageInFlight, Date().timeIntervalSince(lastPage) > 15 else { return }
-        let paired = ((IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice]) ?? []).filter(Self.looksLikeBuds)
-        let last = UserDefaults.standard.string(forKey: "lastBudsAddress")
-        guard let target = paired.first(where: { $0.addressString == last }) ?? paired.first else { return }
+        guard let target = pairedBuds() else { return }
         pageInFlight = true
         lastPage = Date()
         log?(.info, "asking \(target.name ?? "buds") to connect to this Mac")
@@ -313,6 +322,7 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
         }
         guard let buds = findBuds() else {
             link = .searching
+            if let name = pairedBuds()?.name, name != deviceName { deviceName = name }
             pageBuds()
             scheduleRetry()
             return
@@ -673,7 +683,12 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
             guard let reported = NoiseLayouts.reportedMode(
                 for: mask, productID: productID, deviceName: deviceName
             ) else { return }
-            noiseBit = NoiseLayouts.bit(for: reported.mode, level: reported.level, layout: layout) ?? bit
+            // The developer view ticks a row of the set layout. Most models report the bit they
+            // are in (Transparency is bit 8 on the Buds 4, not the bit 2 used to set it), so show
+            // that; only Buds Pro 3 need their reported mask mapped back to a set-layout bit.
+            noiseBit = NoiseLayouts.reportsSeparateLayout(productID: productID, deviceName: deviceName)
+                ? NoiseLayouts.bit(for: reported.mode, level: reported.level, layout: layout) ?? bit
+                : bit
             mode = reported.mode
             level = reported.level ?? (reported.mode == .anc ? level : nil)
             return

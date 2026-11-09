@@ -8,11 +8,11 @@ final class HUD {
     private var panel: NSPanel?
     private var hideWork: DispatchWorkItem?
 
-    func show(mode: NoiseMode, level: ANCLevel?) {
+    func show(mode: NoiseMode, level: ANCLevel?, deviceName: String) {
         let panel = self.panel ?? makePanel()
         self.panel = panel
 
-        let host = NSHostingView(rootView: HUDView(mode: mode, level: level))
+        let host = NSHostingView(rootView: HUDView(mode: mode, level: level, deviceName: deviceName))
         let size = host.fittingSize
         panel.contentView = host
         if let screen = NSScreen.main {
@@ -58,6 +58,7 @@ final class HUD {
 private struct HUDView: View {
     let mode: NoiseMode
     let level: ANCLevel?
+    let deviceName: String
 
     var body: some View {
         HStack(spacing: 14) {
@@ -67,7 +68,7 @@ private struct HUDView: View {
                 .tintedCircleGlass(mode == .off ? nil : .accentColor)
             VStack(alignment: .leading, spacing: 2) {
                 Text(mode.title).font(.headline)
-                Text(level.map { "\($0.title) level" } ?? "OnePlus Buds")
+                Text(level.map { "\($0.title) level" } ?? deviceName)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }

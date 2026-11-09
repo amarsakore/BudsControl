@@ -15,10 +15,13 @@ struct MenuView: View {
                     if buds.mode == .anc, !buds.availableLevels.isEmpty {
                         levels.transition(.blurReplace)
                     }
-                    batteries
-                    moreToggle
-                    Collapsible(expanded: moreExpanded) {
-                        MoreControls(buds: buds)
+                    // Own stack with no spacing: the gap above the panel is part of the panel, so a
+                    // folded panel leaves no extra space under the battery row.
+                    VStack(spacing: 0) {
+                        batteries
+                        Collapsible(expanded: moreExpanded) {
+                            MoreControls(buds: buds).padding(.top, 10)
+                        }
                     }
                 } else {
                     disconnected
@@ -33,21 +36,21 @@ struct MenuView: View {
     }
 
     /// The down arrow that reveals equalizer, low latency, find my earbuds and gestures.
+    /// Round chevron beside the ••• button, the same size, that folds the More panel open and shut.
     private var moreToggle: some View {
         Button {
             moreExpanded.toggle()
         } label: {
-            HStack(spacing: 4) {
-                Text(moreExpanded ? "Less" : "More").font(.caption.weight(.medium))
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .bold))
-                    .rotationEffect(.degrees(moreExpanded ? 180 : 0))
-            }
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, minHeight: 18)
-            .contentShape(Rectangle())
+            Image(systemName: "chevron.down")
+                .font(.system(size: 9, weight: .bold))
+                .rotationEffect(.degrees(moreExpanded ? 180 : 0))
+                .foregroundStyle(.secondary)
+                .frame(width: 24, height: 24)
+                .circleGlass(interactive: true)
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .help(moreExpanded ? "Fewer controls" : "Equalizer, low latency, find earbuds and gestures")
         .accessibilityLabel(moreExpanded ? "Show fewer controls" : "Show more controls")
     }
 
@@ -64,22 +67,29 @@ struct MenuView: View {
                     .contentTransition(.opacity)
             }
             Spacer(minLength: 0)
-            Menu {
-                Button("Settings…") { openSettings() }.keyboardShortcut(",")
-                Button("Reconnect") { buds.reconnect() }
-                Divider()
-                Button("Quit Buds Control") { NSApp.terminate(nil) }.keyboardShortcut("q")
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(width: 24, height: 24)
-                    .circleGlass(interactive: true)
+            HStack(spacing: 6) {
+                if buds.link == .connected { moreToggle }
+                menu
             }
-            .menuStyle(.button)
-            .menuIndicator(.hidden)
-            .buttonStyle(.plain)
-            .fixedSize()
         }
+    }
+
+    private var menu: some View {
+        Menu {
+            Button("Settings…") { openSettings() }.keyboardShortcut(",")
+            Button("Reconnect") { buds.reconnect() }
+            Divider()
+            Button("Quit Buds Control") { NSApp.terminate(nil) }.keyboardShortcut("q")
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 24, height: 24)
+                .circleGlass(interactive: true)
+        }
+        .menuStyle(.button)
+        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
+        .fixedSize()
     }
 
     private var subtitle: String {
@@ -195,8 +205,6 @@ private struct Collapsible<Content: View>: View {
             .opacity(expanded ? 1 : 0)
             .frame(height: expanded ? size.height : 0, alignment: .top)
             .clipped()
-            // While folded the stack still adds its spacing; pull it back so the toggle sits at the bottom.
-            .padding(.top, expanded ? 0 : -10)
             .allowsHitTesting(expanded)
             .accessibilityHidden(!expanded)
     }

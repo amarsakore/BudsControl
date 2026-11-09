@@ -48,7 +48,9 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
     @Published private(set) var channelID: BluetoothRFCOMMChannelID?
     @Published private(set) var address: String?
 
-    var layout: [Int: Int] { NoiseLayouts.layout(for: productID) }
+    var layout: [Int: Int] {
+        NoiseLayouts.setLayout(for: productID, deviceName: deviceName)
+    }
     var availableLevels: [ANCLevel] { NoiseLayouts.levels(in: layout) }
     /// Built-in presets for this model followed by the custom EQs stored on the buds.
     var eqChoices: [EQPreset] {
@@ -67,11 +69,16 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
     /// Every decoded frame from the buds (developer tooling).
     var onFrame: ((Frame) -> Void)?
 
-    // HeyMelody's SPP service UUID; the RFCOMM channel is read from its SDP record when available.
-    private static let serviceUUID = IOBluetoothSDPUUID(bytes: [
+    // HeyMelody advertises both UUIDs on different generations of buds.
+    private static let serviceUUIDs = [
+        IOBluetoothSDPUUID(bytes: [
+            0x00, 0x00, 0x07, 0x9A, 0xD1, 0x02, 0x11, 0xE1, 0x9B, 0x23, 0x00, 0x02, 0x5B, 0x00, 0xA5, 0xA5,
+        ] as [UInt8], length: 16),
+        IOBluetoothSDPUUID(bytes: [
         0x00, 0x00, 0x11, 0x07, 0xD1, 0x02, 0x11, 0xE1, 0x9B, 0x23, 0x00, 0x02, 0x5B, 0x00, 0xA5, 0xA5,
-    ] as [UInt8], length: 16)
-    private static let fallbackChannels: [BluetoothRFCOMMChannelID] = [12, 13]
+        ] as [UInt8], length: 16)
+    ]
+    private static let fallbackChannels: [BluetoothRFCOMMChannelID] = [15, 12, 13]
     private static let retryDelays: [TimeInterval] = [1, 2, 3, 5, 8]
 
     private var device: IOBluetoothDevice?
@@ -321,7 +328,8 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
         var channels: [BluetoothRFCOMMChannelID] = []
         let records = (buds.services as? [IOBluetoothSDPServiceRecord]) ?? []
         let named = records.filter { ($0.getServiceName() ?? "").lowercased().contains("enco") }
-        for record in named + [buds.getServiceRecord(for: Self.serviceUUID)].compactMap({ $0 }) {
+        let uuidRecords = Self.serviceUUIDs.compactMap { buds.getServiceRecord(for: $0) }
+        for record in named + uuidRecords {
             var id: BluetoothRFCOMMChannelID = 0
             if record.getRFCOMMChannelID(&id) == kIOReturnSuccess, !channels.contains(id) { channels.append(id) }
         }
@@ -458,8 +466,9 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
             setMode(mode, level: level)
         }
         send(Command.productID)
-        // Ask for pushes: battery, wear status, noise mode, game mode, multipoint hosts.
-        send(Command.subscribe, [0x09, 0x01, 0x02, 0x03, 0x05, 0x06])
+        // Ask for pushes: battery, wear status and noise mode. The first byte is
+        // the number of subscription ids, not a byte count.
+        send(Command.subscribe, [0x03, 0x01, 0x02, 0x03])
         send(Command.wearStatus)
         send(Command.multipointQuery)
         send(Command.eqQuery)
@@ -661,10 +670,12 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
             let mask = Int(p[idx + 2]) | (idx + 3 < p.count ? Int(p[idx + 3]) << 8 : 0)
             guard mask != 0 else { continue }
             let bit = mask.trailingZeroBitCount
-            noiseBit = bit
-            guard let type = layout[bit] else { return }
-            mode = NoiseLayouts.mode(forType: type)
-            level = ANCLevel.allCases.first { $0.modeType == type } ?? (mode == .anc ? level : nil)
+            guard let reported = NoiseLayouts.reportedMode(
+                for: mask, productID: productID, deviceName: deviceName
+            ) else { return }
+            noiseBit = NoiseLayouts.bit(for: reported.mode, level: reported.level, layout: layout) ?? bit
+            mode = reported.mode
+            level = reported.level ?? (reported.mode == .anc ? level : nil)
             return
         }
     }

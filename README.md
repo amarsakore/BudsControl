@@ -31,7 +31,8 @@ on OnePlus Buds 4, without the phone app.</p>
 - OnePlus Buds 4, paired with the Mac in System Settings › Bluetooth
 
 Other OnePlus / OPPO earbuds that use the HeyMelody app (Buds 3, Buds Pro 2/3/4, Nord Buds 3 Pro / 4 / 4 Pro…)
-speak the same protocol and will probably work, but only the Buds 4 has been tested.
+speak the same protocol and will probably work. Buds 4 and Buds Pro 3 have model-specific transport and
+noise-mode handling; other models may need their own mode mapping.
 
 ## Install
 
@@ -92,7 +93,7 @@ Replies use the request command with the high bit set (`0x0106` → `0x8106`).
 | `0x0109` | wear status |
 | `0x010C [01 01]` | noise mode → bitmask |
 | `0x0112` | paired devices (multipoint) |
-| `0x0205 [09 …]` | subscribe to pushes (battery, wear, noise mode, game mode, multipoint) |
+| `0x0205 [count, ids…]` | subscribe to pushes (battery, wear and noise mode) |
 | `0x0204` | push from the buds; first byte is the subscription type |
 | `0x0108` / `0x0401 [01 side 01 gesture action]` | read / set touch gestures |
 | `0x010D [n ids…]` / `0x0403 [id on]` | read / set on-off features (`06` = low latency) |

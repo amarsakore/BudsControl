@@ -142,6 +142,12 @@ enum NoiseLayouts {
         "060C14": [0: 1, 1: 2, 2: 3, 3: 4, 4: 7],                                  // OnePlus Buds Pro
     ]
 
+    /// Buds Pro 3 uses one mask layout for writes and a different 16-bit layout
+    /// in status replies. The write slots still use the common HeyMelody types.
+    static let budsPro3Set: [Int: Int] = [
+        0: 1, 1: 5, 2: 2, 4: 4, 5: 8, 6: 3, 7: 7
+    ]
+
     static let modelNames: [String: String] = [
         "065414": "OnePlus Buds 4",
         "063C14": "OnePlus Buds 3",
@@ -157,6 +163,33 @@ enum NoiseLayouts {
 
     static func layout(for productID: String?) -> [Int: Int] {
         table[productID ?? onePlusBuds4] ?? table[onePlusBuds4]!
+    }
+
+    static func setLayout(for productID: String?, deviceName: String?) -> [Int: Int] {
+        if productID == "064014" || deviceName?.lowercased().contains("buds pro 3") == true {
+            return budsPro3Set
+        }
+        return layout(for: productID)
+    }
+
+    static func reportedMode(for mask: Int, productID: String?, deviceName: String?)
+        -> (mode: NoiseMode, level: ANCLevel?)?
+    {
+        if productID == "064014" || deviceName?.lowercased().contains("buds pro 3") == true {
+            switch mask {
+            case 0x0008: return (.off, nil)
+            case 0x0100: return (.transparency, nil)
+            case 0x1000: return (.anc, .max)
+            case 0x2000: return (.anc, .moderate)
+            case 0x4000: return (.anc, .mild)
+            case 0x8000: return (.anc, .smart)
+            default: return nil
+            }
+        }
+
+        let bit = mask.trailingZeroBitCount
+        guard let type = layout(for: productID)[bit] else { return nil }
+        return (mode(forType: type), ANCLevel.allCases.first { $0.modeType == type })
     }
 
     static func mode(forType type: Int) -> NoiseMode {

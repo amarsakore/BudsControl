@@ -155,6 +155,10 @@ if args.contains("--sdp") {
         print("eq:      \(buds.eqID.map(String.init) ?? "?") \(buds.eqChoices.first { $0.id == buds.eqID }?.name ?? "")"
               + (buds.activeCustomEQ.map { " " + $0.bands.map { "\($0.hz)Hz:\($0.gain)" }.joined(separator: " ") } ?? ""))
         print("lowlat:  \(buds.gameMode.map { $0 ? "on" : "off" } ?? "?")")
+        print("model:   \(buds.model.name.isEmpty ? "not in catalog" : buds.model.name), capability bits: "
+              + (buds.capabilities.map { "\($0.count)" } ?? "none"))
+        print("modes:   \(buds.availableModes.map(\.rawValue)) levels: \(buds.availableLevels.map(\.rawValue))")
+        print("shows:   " + DeviceFeature.allCases.filter(buds.supports).map { "\($0)" }.joined(separator: " "))
         for side in EarSide.allCases {
             print("gesture: \(side) " + Gesture.allCases.map { "\($0)=\(buds.gestures[side]?[$0].map { "\($0)" } ?? "?")" }
                 .joined(separator: " "))

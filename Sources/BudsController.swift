@@ -48,14 +48,52 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
     @Published private(set) var channelID: BluetoothRFCOMMChannelID?
     @Published private(set) var address: String?
 
-    var layout: [Int: Int] {
-        NoiseLayouts.setLayout(for: productID, deviceName: deviceName)
+    /// Capability bits from the buds' reply to hello (0x8100); nil until (or unless) they send one.
+    @Published private(set) var capabilities: Set<Int>?
+
+    /// What this model supports: the catalog entry for its product ID, or a safe generic one.
+    var model: DeviceModel { DeviceCatalog.model(productID: productID, deviceName: deviceName) }
+    /// Every bit -> modeType the buds may report (the developer view lists these).
+    var layout: [Int: Int] { model.reportedBits }
+    var availableModes: [NoiseMode] {
+        NoiseMode.allCases.filter { mode in model.modeTypes.contains { ModeType.mode($0) == mode } }
     }
-    var availableLevels: [ANCLevel] { NoiseLayouts.levels(in: layout) }
+    var availableLevels: [ANCLevel] { ANCLevel.allCases.filter { model.modeTypes.contains($0.modeType) } }
+
+    /// Whether to show a setting: nothing may rule it out (catalog, capability bit), and the buds must
+    /// have answered for it, so a control never appears for something the model can't do.
+    func supports(_ feature: DeviceFeature) -> Bool {
+        if let features = model.features, !features.contains(feature) { return false }
+        if let capabilities, !capabilities.contains(feature.capabilityBit) { return false }
+        switch feature {
+        case .noiseControl: return mode != nil && !availableModes.isEmpty
+        case .equalizer: return eqID != nil && !eqChoices.isEmpty
+        case .customEQ: return !customEQs.isEmpty
+        case .lowLatency: return gameMode != nil
+        case .gestures: return !gestures.isEmpty
+        // No query to confirm it, so it needs positive word from the catalog or the capability bits.
+        case .findBuds: return model.features != nil || capabilities != nil
+        }
+    }
+
+    var hasMoreControls: Bool { [.equalizer, .lowLatency, .findBuds, .gestures].contains(where: supports) }
+
     /// Built-in presets for this model followed by the custom EQs stored on the buds.
     var eqChoices: [EQPreset] {
-        (EQPresets.byProduct[productID ?? NoiseLayouts.onePlusBuds4] ?? [])
+        model.eqPresets.map { EQPreset(id: $0.0, name: EQPresets.name(forModeType: $0.1)) }
             + customEQs.map { EQPreset(id: $0.id, name: $0.name) }
+    }
+
+    /// Gesture actions for this brand (realme has its own assistant code and no noise-control
+    /// gesture), plus noise control / low latency only when the buds have them.
+    func gestureActions(current: GestureAction?) -> [GestureAction] {
+        var actions: [GestureAction] = model.brand == .realme
+            ? [.none, .playPause, .previous, .next, .volumeUp, .volumeDown, .assistantRealme]
+            : [.none, .playPause, .assistant, .previous, .next, .volumeUp, .volumeDown]
+        if model.brand != .realme, supports(.noiseControl) { actions.append(.noiseControl) }
+        if supports(.lowLatency) { actions.append(.lowLatency) }
+        if let current, !actions.contains(current) { actions.append(current) }
+        return actions
     }
     var activeCustomEQ: CustomEQ? { customEQs.first { $0.id == eqID } }
     /// Lowest earbud level, for the menu bar ring.
@@ -78,6 +116,8 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
         0x00, 0x00, 0x11, 0x07, 0xD1, 0x02, 0x11, 0xE1, 0x9B, 0x23, 0x00, 0x02, 0x5B, 0x00, 0xA5, 0xA5,
         ] as [UInt8], length: 16)
     ]
+    /// realme buds take control commands on the standard serial-port service (Gadgetbridge).
+    private static let standardSPP = IOBluetoothSDPUUID(uuid16: 0x1101)
     private static let fallbackChannels: [BluetoothRFCOMMChannelID] = [15, 12, 13]
     private static let retryDelays: [TimeInterval] = [1, 2, 3, 5, 8]
 
@@ -171,24 +211,30 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
             return
         }
         // Plain "ANC" uses the last level picked, so the level row always shows a selection;
-        // the generic ANC bit makes the buds report no level at all.
+        // models without levels use their plain ANC mode.
         var level = level
-        if mode == .anc, level == nil {
+        if mode == .anc, level == nil, !availableLevels.isEmpty {
             level = self.level ?? UserDefaults.standard.string(forKey: "lastANCLevel").flatMap(ANCLevel.init(rawValue:))
             if level.map(availableLevels.contains) != true { level = availableLevels.first }
         }
-        guard let bit = NoiseLayouts.bit(for: mode, level: level, layout: layout) else {
+        let type = switch mode {
+        case .off: ModeType.off
+        case .transparency: ModeType.transparency
+        case .anc: level?.modeType ?? ModeType.anc
+        }
+        guard let bit = model.bit(forType: type) else {
             log?(.info, "mode \(mode) not supported by \(productID ?? "unknown model")")
             return
         }
         self.mode = mode
-        self.level = mode == .anc ? (level ?? self.level) : nil
+        self.level = mode == .anc ? level : nil
         setNoiseBit(bit)
     }
 
     func cycleMode() {
-        let order: [NoiseMode] = [.anc, .transparency, .off]
-        let next = order[((order.firstIndex(of: mode ?? .off) ?? 2) + 1) % order.count]
+        let order: [NoiseMode] = [.anc, .transparency, .off].filter(availableModes.contains)
+        guard !order.isEmpty else { return }
+        let next = order[((order.firstIndex(of: mode ?? .off) ?? order.count - 1) + 1) % order.count]
         setMode(next)
     }
 
@@ -201,8 +247,8 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
         staleNoiseQueries.formUnion(outstandingNoiseQueries)
         noiseBit = bit
         if let type = layout[bit] {
-            mode = NoiseLayouts.mode(forType: type)
-            if let lvl = ANCLevel.allCases.first(where: { $0.modeType == type }) { level = lvl }
+            mode = ModeType.mode(type)
+            if let lvl = ANCLevel(modeType: type) { level = lvl }
         }
         send(Command.setNoise, payload)
         expectReply()
@@ -278,9 +324,11 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
 
     // MARK: - Connection
 
+    /// Connected buds, preferring ones that advertise the HeyMelody control service.
     private func findBuds() -> IOBluetoothDevice? {
-        let paired = (IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice]) ?? []
-        return paired.first { Self.looksLikeBuds($0) && $0.isConnected() }
+        let connected = ((IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice]) ?? [])
+            .filter { $0.isConnected() && Self.looksLikeBuds($0) }
+        return connected.first(where: Self.hasControlService) ?? connected.first
     }
 
     /// The buds this Mac last talked to, or any paired buds; connected or not.
@@ -309,9 +357,19 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
         // On success the connect notification takes it from here.
     }
 
+    /// OnePlus, OPPO, realme (and DIZO) buds: either they advertise the HeyMelody service, which
+    /// also catches renamed buds, or their name carries the brand. A bare "buds" isn't enough, so
+    /// other makers' earbuds are left alone.
     private static func looksLikeBuds(_ d: IOBluetoothDevice) -> Bool {
+        if hasControlService(d) { return true }
         let name = (d.name ?? "").lowercased()
-        return ["oneplus", "buds", "enco", "oppo", "realme"].contains { name.contains($0) }
+        return ["oneplus", "oppo", "enco", "realme", "dizo"].contains { name.contains($0) }
+    }
+
+    private static func hasControlService(_ d: IOBluetoothDevice) -> Bool {
+        let records = (d.services as? [IOBluetoothSDPServiceRecord]) ?? []
+        return records.contains { ($0.getServiceName() ?? "").lowercased().contains("enco") }
+            || serviceUUIDs.contains { d.getServiceRecord(for: $0) != nil }
     }
 
     private func connect() {
@@ -327,6 +385,7 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
             scheduleRetry()
             return
         }
+        if let previous = device, previous.addressString != buds.addressString { resetDeviceState() }
         device = buds
         deviceName = buds.name ?? deviceName
         address = buds.addressString?.uppercased().replacingOccurrences(of: "-", with: ":")
@@ -338,7 +397,11 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
         var channels: [BluetoothRFCOMMChannelID] = []
         let records = (buds.services as? [IOBluetoothSDPServiceRecord]) ?? []
         let named = records.filter { ($0.getServiceName() ?? "").lowercased().contains("enco") }
-        let uuidRecords = Self.serviceUUIDs.compactMap { buds.getServiceRecord(for: $0) }
+        var uuidRecords = Self.serviceUUIDs.compactMap { buds.getServiceRecord(for: $0) }
+        // realme: the standard serial port, but only when there's no HeyMelody service to use.
+        if named.isEmpty, uuidRecords.isEmpty, let spp = buds.getServiceRecord(for: Self.standardSPP) {
+            uuidRecords.append(spp)
+        }
         for record in named + uuidRecords {
             var id: BluetoothRFCOMMChannelID = 0
             if record.getRFCOMMChannelID(&id) == kIOReturnSuccess, !channels.contains(id) { channels.append(id) }
@@ -471,11 +534,9 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
         disconnectNotification = device?.register(forDisconnectNotification: self,
                                                   selector: #selector(deviceDidDisconnect(_:device:)))
         send(Command.hello)
-        if let (mode, level) = queuedMode {
-            queuedMode = nil
-            setMode(mode, level: level)
-        }
         send(Command.productID)
+        // A mode requested while disconnected waits for the product ID, so it uses the right layout.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.applyQueuedMode() }
         // Ask for pushes: battery, wear status and noise mode. The first byte is
         // the number of subscription ids, not a byte count.
         send(Command.subscribe, [0x03, 0x01, 0x02, 0x03])
@@ -529,8 +590,11 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
             if p.count >= 4, p[0] == 0 {
                 let pid = String(format: "%02X%02X%02X", p[3], p[2], p[1])
                 productID = pid
-                if let name = NoiseLayouts.modelNames[pid], device?.name == nil { deviceName = name }
+                if !model.name.isEmpty, device?.name == nil { deviceName = model.name }
+                applyQueuedMode()
             }
+        case Command.hello | 0x8000:
+            parseCapabilities(p)
         case Command.battery | 0x8000:
             parseBattery(p)
         case Command.noiseQuery | 0x8000:
@@ -608,6 +672,37 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
         }
     }
 
+    /// Payload: <status> <bitmap, LSB first>. Each bit says a group of commands is supported.
+    private func parseCapabilities(_ p: [UInt8]) {
+        guard p.count >= 2, p[0] == 0 else { return }
+        var bits: Set<Int> = []
+        for (byteIndex, byte) in p.dropFirst().enumerated() {
+            for bit in 0..<8 where byte & (1 << bit) != 0 { bits.insert(byteIndex * 8 + bit) }
+        }
+        capabilities = bits
+    }
+
+    /// Forget everything learned about the previous buds when different ones connect.
+    private func resetDeviceState() {
+        productID = nil
+        capabilities = nil
+        mode = nil
+        level = nil
+        noiseBit = nil
+        left = nil; right = nil; caseBattery = nil
+        gameMode = nil
+        eqID = nil
+        customEQs = []
+        gestures = [:]
+        hosts = []
+    }
+
+    private func applyQueuedMode() {
+        guard link == .connected, let (mode, level) = queuedMode else { return }
+        queuedMode = nil
+        setMode(mode, level: level)
+    }
+
     /// Payload: <status> <count> (<feature id> <0 off | 1 on>)*
     private func parseSwitches(_ p: [UInt8]) {
         guard p.count >= 2, p[0] == 0 else { return }
@@ -679,18 +774,17 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
         for idx in 0..<(p.count - 2) where p[idx] == 0x01 && p[idx + 1] == 0x01 {
             let mask = Int(p[idx + 2]) | (idx + 3 < p.count ? Int(p[idx + 3]) << 8 : 0)
             guard mask != 0 else { continue }
+            // Models can report a different bit than the one used to set a mode (Transparency is
+            // set with bit 2 but reported as bit 8 on the Buds 4; Buds Pro 3 report levels in bits
+            // 12-15), so look the bit up in the model's reported layout.
             let bit = mask.trailingZeroBitCount
-            guard let reported = NoiseLayouts.reportedMode(
-                for: mask, productID: productID, deviceName: deviceName
-            ) else { return }
-            // The developer view ticks a row of the set layout. Most models report the bit they
-            // are in (Transparency is bit 8 on the Buds 4, not the bit 2 used to set it), so show
-            // that; only Buds Pro 3 need their reported mask mapped back to a set-layout bit.
-            noiseBit = NoiseLayouts.reportsSeparateLayout(productID: productID, deviceName: deviceName)
-                ? NoiseLayouts.bit(for: reported.mode, level: reported.level, layout: layout) ?? bit
-                : bit
-            mode = reported.mode
-            level = reported.level ?? (reported.mode == .anc ? level : nil)
+            guard let type = model.reportedBits[bit] else {
+                log?(.info, "unknown noise bit \(bit) for \(productID ?? "unknown model")")
+                return
+            }
+            noiseBit = bit
+            mode = ModeType.mode(type)
+            level = ANCLevel(modeType: type) ?? (mode == .anc ? level : nil)
             return
         }
     }

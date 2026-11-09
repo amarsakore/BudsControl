@@ -18,16 +18,23 @@ struct MoreControls: View {
 
     @ViewBuilder private var equalizer: some View {
         let choices = buds.eqChoices
-        if !choices.isEmpty {
+        let current = choices.first { $0.id == buds.eqID }
+        if buds.supports(.equalizer) {
             Card(title: "Equalizer", symbol: "slider.vertical.3") {
-                LiquidSegmented(items: choices, selection: choices.first { $0.id == buds.eqID }, height: 22,
-                                onSelect: { buds.setEQ($0.id) }, label: { preset, selected in
-                    Text(preset.name)
-                        .font(.caption2.weight(selected ? .semibold : .medium))
-                        .foregroundStyle(selected ? Color.primary : Color.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)  // last resort if the labels can't all fit
-                }, fitToLabels: true)
+                if choices.count <= 4 {
+                    LiquidSegmented(items: choices, selection: current, height: 22,
+                                    onSelect: { buds.setEQ($0.id) }, label: { preset, selected in
+                        Text(preset.name)
+                            .font(.caption2.weight(selected ? .semibold : .medium))
+                            .foregroundStyle(selected ? Color.primary : Color.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)  // last resort if the labels can't all fit
+                    }, fitToLabels: true)
+                } else {
+                    // Some models have five or more presets: a row of chips would be unreadable.
+                    PickerRow(title: "Preset", value: current?.name ?? "—",
+                              options: choices.map { ($0.name, nil) }) { index in buds.setEQ(choices[index].id) }
+                }
                 if let custom = buds.activeCustomEQ {
                     EQBands(eq: custom) { buds.setCustomEQ(gains: $0) }
                         .transition(.opacity.combined(with: .move(edge: .top)))
@@ -38,7 +45,11 @@ struct MoreControls: View {
 
     // MARK: Low latency
 
-    private var lowLatency: some View {
+    @ViewBuilder private var lowLatency: some View {
+        if buds.supports(.lowLatency) { lowLatencyCard }
+    }
+
+    private var lowLatencyCard: some View {
         Card {
             Row(title: "Low latency", subtitle: "For games and video", symbol: "gamecontroller") {
                 Toggle("Low latency", isOn: Binding(get: { buds.gameMode ?? false }, set: { buds.setGameMode($0) }))
@@ -51,7 +62,11 @@ struct MoreControls: View {
 
     // MARK: Find my earbuds
 
-    private var findBuds: some View {
+    @ViewBuilder private var findBuds: some View {
+        if buds.supports(.findBuds) { findBudsCard }
+    }
+
+    private var findBudsCard: some View {
         Card {
             Row(title: "Find earbuds",
                 subtitle: buds.findingBuds ? "Playing a sound…" : "Loud — take them out of your ears first",
@@ -67,18 +82,22 @@ struct MoreControls: View {
     // MARK: Gestures
 
     @ViewBuilder private var gestureSection: some View {
-        if !buds.gestures.isEmpty {
-            let side = EarSide(rawValue: UInt8(gestureSide)) ?? .left
+        if buds.supports(.gestures) {
+            let sides = EarSide.allCases.filter { buds.gestures[$0] != nil }
+            let side = sides.first { $0.rawValue == UInt8(gestureSide) } ?? sides.first ?? .left
             Card(title: "Gestures", symbol: "hand.tap") {
-                LiquidSegmented(items: EarSide.allCases, selection: side, height: 22,
+                LiquidSegmented(items: sides, selection: side, height: 22,
                                 onSelect: { gestureSide = Int($0.rawValue) }) { side, selected in
                     Text(side.title)
                         .font(.caption2.weight(selected ? .semibold : .medium))
                         .foregroundStyle(selected ? Color.primary : Color.secondary)
                 }
-                ForEach(Gesture.allCases) { gesture in
-                    GestureRow(gesture: gesture, action: buds.gestures[side]?[gesture]) { action in
-                        buds.setGesture(action, for: gesture, side: side)
+                // Only the gestures these buds report, with the actions their brand accepts.
+                ForEach(Gesture.allCases.filter { buds.gestures[side]?[$0] != nil }) { gesture in
+                    let current = buds.gestures[side]?[gesture]
+                    PickerRow(title: gesture.title, value: current?.title ?? "—",
+                              options: buds.gestureActions(current: current).map { ($0.title, $0.symbol) }) { index in
+                        buds.setGesture(buds.gestureActions(current: current)[index], for: gesture, side: side)
                     }
                 }
             }
@@ -136,26 +155,32 @@ private struct Row<Accessory: View>: View {
     }
 }
 
-private struct GestureRow: View {
-    let gesture: Gesture
-    let action: GestureAction?
-    let onChange: (GestureAction) -> Void
+/// A label with a compact menu on the right, in the popover's capsule style.
+private struct PickerRow: View {
+    let title: String
+    let value: String
+    let options: [(title: String, symbol: String?)]
+    let onSelect: (Int) -> Void
 
     var body: some View {
         HStack {
-            Text(gesture.title).font(.caption)
+            Text(title).font(.caption)
             Spacer(minLength: 4)
             Menu {
-                ForEach(GestureAction.allCases) { option in
+                ForEach(options.indices, id: \.self) { index in
                     Button {
-                        onChange(option)
+                        onSelect(index)
                     } label: {
-                        Label(option.title, systemImage: option.symbol)
+                        if let symbol = options[index].symbol {
+                            Label(options[index].title, systemImage: symbol)
+                        } else {
+                            Text(options[index].title)
+                        }
                     }
                 }
             } label: {
                 HStack(spacing: 4) {
-                    Text(action?.title ?? "—").font(.caption.weight(.medium))
+                    Text(value).font(.caption.weight(.medium))
                     Image(systemName: "chevron.up.chevron.down").font(.system(size: 7, weight: .bold))
                 }
                 .foregroundStyle(.secondary)

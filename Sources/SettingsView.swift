@@ -149,7 +149,7 @@ private struct DeveloperSettings: View {
                 ForEach(buds.layout.keys.sorted(), id: \.self) { bit in
                     HStack {
                         Text("bit \(bit)").monospacedDigit().foregroundStyle(.secondary).frame(width: 50, alignment: .leading)
-                        Text(NoiseLayouts.typeName(buds.layout[bit]!))
+                        Text(ModeType.name(buds.layout[bit]!))
                         Spacer()
                         if buds.noiseBit == bit {
                             Image(systemName: "checkmark").foregroundStyle(Color.accentColor)

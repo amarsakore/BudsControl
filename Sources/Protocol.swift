@@ -108,7 +108,7 @@ enum NoiseMode: String, CaseIterable, Identifiable {
 }
 
 enum ANCLevel: String, CaseIterable, Identifiable {
-    case smart, max, moderate, mild
+    case smart, max, moderate, mild, adaptive
     var id: String { rawValue }
     var title: String { rawValue.capitalized }
 
@@ -119,85 +119,24 @@ enum ANCLevel: String, CaseIterable, Identifiable {
         case .max: 4
         case .smart: 7
         case .moderate: 8
+        case .adaptive: 10
         }
+    }
+
+    init?(modeType: Int) {
+        guard let level = Self.allCases.first(where: { $0.modeType == modeType }) else { return nil }
+        self = level
     }
 }
 
-/// The mode byte on the wire is a bitmask; what each bit means depends on the model.
-/// Layouts map bit index -> modeType (1 off, 2/6 transparency, anything else an ANC flavour).
-/// Taken from HeyMelody's bundled model whitelist.
-enum NoiseLayouts {
-    static let onePlusBuds4 = "065414"
+/// HeyMelody "modeType": what a noise-mode bit means. Which bit carries which type is per model
+/// (see DeviceModel).
+enum ModeType {
+    static let off = 1
+    static let transparency = 2
+    static let anc = 5  // ANC without a level, on models that have no levels
 
-    static let table: [String: [Int: Int]] = [
-        "065414": [0: 1, 1: 5, 2: 2, 3: 1, 4: 4, 5: 8, 6: 3, 7: 7, 8: 2, 11: 10],  // OnePlus Buds 4
-        "063C14": [0: 1, 1: 5, 2: 2, 3: 1, 4: 4, 5: 8, 6: 3, 7: 7, 8: 2],          // OnePlus Buds 3
-        "064014": [0: 1, 1: 5, 2: 2, 3: 1, 4: 4, 5: 8, 6: 3, 7: 7, 8: 2],          // OnePlus Buds Pro 3
-        "067814": [0: 1, 1: 5, 2: 2, 3: 1, 4: 4, 5: 8, 6: 3, 7: 7, 8: 2, 11: 10, 12: 11, 13: 12, 14: 13], // Buds Pro 4
-        "062014": [0: 1, 1: 5, 2: 2, 3: 1, 4: 4, 5: 8, 6: 3, 7: 7, 8: 2],          // OnePlus Buds Pro 2
-        "064414": [0: 1, 1: 5, 2: 2, 3: 1, 4: 4, 5: 8, 6: 3, 7: 7, 8: 2],          // Nord Buds 3 Pro
-        "066814": [0: 1, 1: 5, 2: 2, 3: 1, 4: 4, 5: 8, 6: 3, 7: 7, 8: 2],          // Nord Buds 4 Pro
-        "067014": [0: 1, 1: 5, 2: 2, 3: 1, 4: 4, 5: 8, 6: 3, 7: 7, 8: 2],          // Nord Buds 4
-        "065014": [0: 5, 1: 1, 2: 2],                                              // Nord Buds 3
-        "060C14": [0: 1, 1: 2, 2: 3, 3: 4, 4: 7],                                  // OnePlus Buds Pro
-    ]
-
-    /// Buds Pro 3 uses one mask layout for writes and a different 16-bit layout
-    /// in status replies. The write slots still use the common HeyMelody types.
-    static let budsPro3Set: [Int: Int] = [
-        0: 1, 1: 5, 2: 2, 4: 4, 5: 8, 6: 3, 7: 7
-    ]
-
-    static let modelNames: [String: String] = [
-        "065414": "OnePlus Buds 4",
-        "063C14": "OnePlus Buds 3",
-        "064014": "OnePlus Buds Pro 3",
-        "067814": "OnePlus Buds Pro 4",
-        "062014": "OnePlus Buds Pro 2",
-        "064414": "OnePlus Nord Buds 3 Pro",
-        "066814": "OnePlus Nord Buds 4 Pro",
-        "067014": "OnePlus Nord Buds 4",
-        "065014": "OnePlus Nord Buds 3",
-        "060C14": "OnePlus Buds Pro",
-    ]
-
-    static func layout(for productID: String?) -> [Int: Int] {
-        table[productID ?? onePlusBuds4] ?? table[onePlusBuds4]!
-    }
-
-    /// Buds Pro 3 report noise modes with a different mask than the one they're set with.
-    static func reportsSeparateLayout(productID: String?, deviceName: String?) -> Bool {
-        productID == "064014" || deviceName?.lowercased().contains("buds pro 3") == true
-    }
-
-    static func setLayout(for productID: String?, deviceName: String?) -> [Int: Int] {
-        if reportsSeparateLayout(productID: productID, deviceName: deviceName) {
-            return budsPro3Set
-        }
-        return layout(for: productID)
-    }
-
-    static func reportedMode(for mask: Int, productID: String?, deviceName: String?)
-        -> (mode: NoiseMode, level: ANCLevel?)?
-    {
-        if reportsSeparateLayout(productID: productID, deviceName: deviceName) {
-            switch mask {
-            case 0x0008: return (.off, nil)
-            case 0x0100: return (.transparency, nil)
-            case 0x1000: return (.anc, .max)
-            case 0x2000: return (.anc, .moderate)
-            case 0x4000: return (.anc, .mild)
-            case 0x8000: return (.anc, .smart)
-            default: return nil
-            }
-        }
-
-        let bit = mask.trailingZeroBitCount
-        guard let type = layout(for: productID)[bit] else { return nil }
-        return (mode(forType: type), ANCLevel.allCases.first { $0.modeType == type })
-    }
-
-    static func mode(forType type: Int) -> NoiseMode {
+    static func mode(_ type: Int) -> NoiseMode {
         switch type {
         case 1: .off
         case 2, 6: .transparency
@@ -205,23 +144,8 @@ enum NoiseLayouts {
         }
     }
 
-    /// Bit to set for a mode (and optional ANC level). For plain ANC we prefer the
-    /// model's generic ANC entry (type 5), then fall back to max/smart/moderate/mild.
-    static func bit(for mode: NoiseMode, level: ANCLevel?, layout: [Int: Int]) -> Int? {
-        let wanted: [Int]
-        switch mode {
-        case .off: wanted = [1]
-        case .transparency: wanted = [2, 6]
-        case .anc: wanted = level.map { [$0.modeType] } ?? [5, 4, 7, 8, 3]
-        }
-        for type in wanted {
-            if let bit = layout.filter({ $0.value == type }).keys.min() { return bit }
-        }
-        return nil
-    }
-
-    /// Human-readable name of a HeyMelody modeType, for the developer view.
-    static func typeName(_ type: Int) -> String {
+    /// Human-readable name, for the developer view.
+    static func name(_ type: Int) -> String {
         switch type {
         case 1: "Off"
         case 2: "Transparency"
@@ -234,10 +158,6 @@ enum NoiseLayouts {
         case 10: "ANC · Adaptive"
         default: "Unknown (type \(type))"
         }
-    }
-
-    static func levels(in layout: [Int: Int]) -> [ANCLevel] {
-        ANCLevel.allCases.filter { layout.values.contains($0.modeType) }
     }
 }
 
@@ -263,15 +183,48 @@ struct CustomEQ: Equatable {
 }
 
 enum EQPresets {
-    /// Built-in presets are fixed in firmware and not reported by the buds; IDs and names per model
-    /// (from HeyMelody's tables via RawS-Music). Custom EQs come from the buds themselves (0x8122).
-    static let byProduct: [String: [EQPreset]] = [
-        NoiseLayouts.onePlusBuds4: [
-            EQPreset(id: 0, name: "Balanced"),
-            EQPreset(id: 1, name: "Vocal"),
-            EQPreset(id: 2, name: "Bass"),
-        ],
-    ]
+    /// English names for HeyMelody's EQ "modeType"s (translated from the app's Chinese titles, via
+    /// RawS-Music). Built-in presets aren't reported by the buds, so the catalog lists each model's.
+    static func name(forModeType type: Int) -> String {
+        switch type {
+        case 1: "Classic"
+        case 2: "Bass boost"
+        case 3: "Clear vocals"
+        case 4: "Bright"
+        case 5, 35: "Default"
+        case 6, 36: "Dynaudio Natural"
+        case 7, 37: "Dynaudio Warm"
+        case 8, 38: "Dynaudio Bold"
+        case 9, 39: "Dynaudio Pure"
+        case 10: "Joe Hisaishi"
+        case 11, 17: "Balanced"
+        case 12: "Bass"
+        case 13: "Bright"
+        case 14: "Vocal"
+        case 15: "Mellow"
+        case 16: "Classic"
+        case 18: "Reno Dawn"
+        case 19: "Hans Zimmer"
+        case 20: "Natural"
+        case 21: "Reno Sunrise"
+        case 22: "Pure"
+        case 23: "Bold"
+        case 24: "Spacious"
+        case 25: "Reno Galaxy"
+        case 26: "Ultimate"
+        case 27: "Detailed"
+        case 28: "Pure vocals"
+        case 29: "Big bass"
+        case 30: "Dynaudio"
+        case 31: "Punchy bass"
+        case 32: "Warm vocals"
+        case 33: "Galaxy"
+        case 34: "Vibrant"
+        case 40: "Dynaudio Vocal"
+        case 41: "Clear"
+        default: "Preset \(type)"
+        }
+    }
 }
 
 // MARK: - Gestures
@@ -298,7 +251,7 @@ enum Gesture: UInt8, CaseIterable, Identifiable {
 }
 
 enum GestureAction: UInt8, CaseIterable, Identifiable {
-    case none = 0x00, playPause = 0x01, assistant = 0x03, previous = 0x05, next = 0x06
+    case none = 0x00, playPause = 0x01, assistant = 0x03, assistantRealme = 0x04, previous = 0x05, next = 0x06
     case noiseControl = 0x08, volumeUp = 0x0B, volumeDown = 0x0C, lowLatency = 0x11
     var id: UInt8 { rawValue }
 
@@ -306,7 +259,7 @@ enum GestureAction: UInt8, CaseIterable, Identifiable {
         switch self {
         case .none: "None"
         case .playPause: "Play / Pause"
-        case .assistant: "Voice assistant"
+        case .assistant, .assistantRealme: "Voice assistant"
         case .previous: "Previous track"
         case .next: "Next track"
         case .noiseControl: "Noise control"
@@ -320,7 +273,7 @@ enum GestureAction: UInt8, CaseIterable, Identifiable {
         switch self {
         case .none: "nosign"
         case .playPause: "playpause.fill"
-        case .assistant: "mic.fill"
+        case .assistant, .assistantRealme: "mic.fill"
         case .previous: "backward.fill"
         case .next: "forward.fill"
         case .noiseControl: "waveform"

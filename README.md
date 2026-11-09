@@ -3,7 +3,7 @@
 <h1 align="center">Buds Control</h1>
 
 <p align="center">A native macOS menu bar app for switching <b>Noise Cancellation</b>, <b>Transparency</b> and <b>Off</b>
-on OnePlus,Oppo,Realme buds without the phone app.</p>
+on OnePlus, Oppo, Realme buds without the phone app.</p>
 
 ---
 

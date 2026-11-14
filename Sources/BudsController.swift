@@ -128,6 +128,12 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
     private var seq: UInt8 = 0
     private var retryTimer: Timer?
     private var retryCount = 0
+    /// Control-channel opens that failed in a row, and when the next one may start. If the buds
+    /// disconnect while the Mac sleeps, IOBluetooth can go on reporting them as connected, and
+    /// every open just pages buds that aren't there. So after two failures, wait 6 s, 12 s, …
+    /// up to 5 min between tries, until the buds really connect or a reconnect is asked for.
+    private var failedOpens = 0
+    private var nextOpen = Date.distantPast
     private var pollTimer: Timer?
     private var healthTimer: Timer?
     private var connectNotification: IOBluetoothUserNotification?
@@ -177,7 +183,7 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
             self?.log?(.info, "woke from sleep, checking the connection")
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                 guard let self else { return }
-                if self.link == .connected { self.refresh() } else { self.reconnect() }
+                if self.link == .connected { self.refresh() } else { self.restart() }
             }
         }
         // IOBluetooth can reopen a control channel by itself when the buds come back (e.g. one from
@@ -195,7 +201,7 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
         // Safety net for every path above: if the buds are connected to this Mac but the app
         // isn't talking to them, connect — no Retry click needed.
         healthTimer = Self.timer(3, repeats: true) { [weak self] in
-            guard let self, self.link == .searching, self.findBuds() != nil else { return }
+            guard let self, self.link == .searching, Date() >= self.nextOpen, self.findBuds() != nil else { return }
             self.log?(.info, "buds are connected but the app isn't, connecting")
             self.retryCount = 0
             self.connect()
@@ -209,9 +215,17 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
         return timer
     }
 
+    /// Asked for (or the link just broke), so it also skips any wait from earlier failures.
     func reconnect() {
+        failedOpens = 0
+        restart()
+    }
+
+    /// One try straight away; if it fails, the wait from earlier failures carries on growing.
+    private func restart() {
         closeChannel()
         retryCount = 0
+        nextOpen = .distantPast
         connect()
     }
 
@@ -427,7 +441,7 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
             log?(.info, "connect skipped (\(channel == nil ? "no channel" : "channel open"), \(link))")
             return
         }
-        guard let buds = findBuds() else {
+        guard let buds = findBuds(), Date() >= nextOpen else {
             link = .searching
             if let name = pairedBuds()?.name, name != deviceName { deviceName = name }
             pageBuds()
@@ -467,6 +481,7 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
     private func openNextChannel() {
         guard let device, !pendingChannels.isEmpty else {
             link = .searching
+            openFailed()
             scheduleRetry()
             return
         }
@@ -526,11 +541,20 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
             guard let self, self.link == .connecting else { return }
             self.log?(.info, "stuck connecting, starting over")
             self.closeChannel()
+            self.openFailed()
             self.retryCount = 0
             self.scheduleRetry()
         }
         connectingWatchdog = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: work)
+    }
+
+    private func openFailed() {
+        failedOpens += 1
+        guard failedOpens >= 2 else { return }
+        let wait = min(300, 3 * pow(2, Double(failedOpens - 1)))
+        nextOpen = Date() + wait
+        log?(.info, "control channel failed \(failedOpens) times in a row, next try in \(Int(wait)) s")
     }
 
     /// Quick retries first (the buds often need a second after connecting), then every 8 s.
@@ -563,6 +587,8 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
         guard Self.looksLikeBuds(device), channel == nil else { return }
         log?(.info, "\(device.name ?? "buds") connected to Mac")
         retryCount = 0
+        failedOpens = 0
+        nextOpen = .distantPast
         // Give the buds a moment to finish setting up audio profiles before opening RFCOMM:
         // at 1.5 s the open hangs; by ~3 s it succeeds in under 0.2 s.
         retryTimer?.invalidate()
@@ -611,6 +637,8 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
         channelID = rfcommChannel.getID()
         link = .connected
         retryCount = 0
+        failedOpens = 0
+        nextOpen = .distantPast
         disconnectNotification?.unregister()
         disconnectNotification = device?.register(forDisconnectNotification: self,
                                                   selector: #selector(deviceDidDisconnect(_:device:)))

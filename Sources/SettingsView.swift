@@ -2,7 +2,6 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var model: AppModel
-    @AppStorage("developerMode") private var developerMode = false
     @StateObject private var ui = SettingsUIState()
 
     var body: some View {
@@ -19,7 +18,7 @@ struct SettingsView: View {
                 }
                 .tag("shortcuts")
 
-            if developerMode {
+            if model.developerMode {
                 DeveloperSettings(buds: model.buds, log: model.packets)
                     .tabItem {
                         Label("Developer", systemImage: "hammer")
@@ -29,7 +28,7 @@ struct SettingsView: View {
         }
         .frame(width: 560)
         .frame(minHeight: 480)
-        .onChange(of: developerMode) { _, on in if !on && ui.tab == "developer" { ui.tab = "general" } }
+        .onChange(of: model.developerMode) { _, on in if !on && ui.tab == "developer" { ui.tab = "general" } }
         .onAppear {
             NSApp.activate(ignoringOtherApps: true)
             DispatchQueue.main.async {
@@ -48,7 +47,6 @@ private struct GeneralSettings: View {
     @ObservedObject var model: AppModel
     @ObservedObject var buds: BudsController
     @AppStorage("showHUD") private var showHUD = true
-    @AppStorage("developerMode") private var developerMode = false
     @AppStorage("autoConnect") private var autoConnect = true
     @AppStorage("rememberSettings") private var rememberSettings = false
 
@@ -86,9 +84,9 @@ private struct GeneralSettings: View {
             }
 
             Section {
-                Toggle(isOn: $developerMode) {
+                Toggle(isOn: $model.developerMode) {
                     Text("Show developer options")
-                    Text("Packet log, raw commands and undocumented modes.")
+                    Text("In-memory packet log, raw commands and undocumented modes.")
                 }
             }
         }

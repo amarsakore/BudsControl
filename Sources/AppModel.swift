@@ -16,10 +16,15 @@ final class AppModel: ObservableObject {
     @Published private(set) var conflicts: Set<ShortcutAction> = []
 
     @AppStorage("showHUD") var showHUD = true
-    @AppStorage("developerMode") var developerMode = false
+    @Published var developerMode = UserDefaults.standard.bool(forKey: "developerMode") {
+        didSet {
+            UserDefaults.standard.set(developerMode, forKey: "developerMode")
+            updatePacketLogging()
+        }
+    }
 
     private init() {
-        buds.log = { [packets] direction, text in packets.append(direction, text) }
+        updatePacketLogging()
         if let data = UserDefaults.standard.data(forKey: "shortcuts"),
            let saved = try? JSONDecoder().decode([String: Shortcut].self, from: data) {
             shortcuts = Dictionary(uniqueKeysWithValues: saved.compactMap { key, value in
@@ -31,6 +36,16 @@ final class AppModel: ObservableObject {
 
     func start() {
         buds.start()
+    }
+
+    private func updatePacketLogging() {
+        if developerMode {
+            buds.log = { [packets] direction, text in packets.append(direction, text) }
+        } else {
+            buds.log = nil
+            packets.clear()
+            packets.paused = false
+        }
     }
 
     func perform(_ action: ShortcutAction) {
@@ -75,13 +90,13 @@ final class AppModel: ObservableObject {
             do {
                 if newValue { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
             } catch {
-                packets.append(.info, "launch at login: \(error.localizedDescription)")
+                buds.log?(.info, "launch at login: \(error.localizedDescription)")
             }
         }
     }
 }
 
-/// Packet log for the developer tab. Kept apart from BudsController so logging doesn't redraw the menu.
+/// In-memory packet log for the developer tab, kept apart from BudsController so it doesn't redraw the menu.
 final class PacketLog: ObservableObject {
     struct Entry: Identifiable {
         let id = UUID()
@@ -92,38 +107,14 @@ final class PacketLog: ObservableObject {
 
     @Published private(set) var entries: [Entry] = []
     @Published var paused = false
-    var echo: ((String) -> Void)?
 
     func append(_ direction: BudsController.LogDirection, _ text: String) {
-        let arrow = switch direction { case .sent: "→ "; case .received: "← "; case .info: "" }
-        echo?(arrow + text)
-        Self.writeToFile(arrow + text)
         guard !paused else { return }
         entries.append(Entry(direction: direction, text: text))
         if entries.count > 600 { entries.removeFirst(entries.count - 600) }
     }
 
     func clear() { entries = [] }
-
-    /// ~/Library/Logs/BudsControl.log, for diagnosing connection problems after the fact.
-    /// Started fresh once it passes 2 MB.
-    private static let file: FileHandle? = {
-        let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/BudsControl.log")
-        let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
-        if size > 2_000_000 || size == 0 { FileManager.default.createFile(atPath: url.path, contents: nil) }
-        let handle = try? FileHandle(forWritingTo: url)
-        _ = try? handle?.seekToEnd()
-        return handle
-    }()
-    private static let fileTime: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
-        return f
-    }()
-
-    private static func writeToFile(_ line: String) {
-        file?.write(Data("\(fileTime.string(from: Date())) \(line)\n".utf8))
-    }
 
     var exportText: String {
         let f = DateFormatter()

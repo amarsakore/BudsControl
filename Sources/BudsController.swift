@@ -742,7 +742,7 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
         case Command.noiseQuery | 0x8000:
             outstandingNoiseQueries.remove(frame.seq)
             if staleNoiseQueries.remove(frame.seq) != nil { return }
-            parseNoise(p)
+            parseNoise(p, prefix: 0x00)
         case Command.setNoise | 0x8000:
             // Acknowledged: read back which level the buds actually picked.
             if p.first != 0 { log?(.info, "mode change rejected: \(hex(p))") }
@@ -834,7 +834,7 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
         switch p.first {
         case 0x01: parseBattery(p)
         case 0x02: parseWear(p)
-        case 0x03: parseNoise(p)
+        case 0x03: parseNoise(p, prefix: 0x03)
         case 0x05 where p.count >= 2: gameMode = p[1] != 0
         case 0x06: parseHosts(p)
         default: refresh()
@@ -1011,26 +1011,17 @@ final class BudsController: NSObject, ObservableObject, IOBluetoothRFCOMMChannel
         wear = result
     }
 
-    /// Payload contains `01 01 <mask lo> [<mask hi>]` where the lowest set bit is the active mode.
-    private func parseNoise(_ p: [UInt8]) {
-        guard p.count >= 3 else { return }
-        for idx in 0..<(p.count - 2) where p[idx] == 0x01 && p[idx + 1] == 0x01 {
-            let mask = Int(p[idx + 2]) | (idx + 3 < p.count ? Int(p[idx + 3]) << 8 : 0)
-            guard mask != 0 else { continue }
-            // Models can report a different bit than the one used to set a mode (Transparency is
-            // set with bit 2 but reported as bit 8 on the Buds 4; Buds Pro 3 report levels in bits
-            // 12-15), so look the bit up in the model's reported layout.
-            let bit = mask.trailingZeroBitCount
-            guard let type = model.reportedBits[bit] else {
-                log?(.info, "unknown noise bit \(bit) for \(productID ?? "unknown model")")
-                return
-            }
-            noiseBit = bit
-            mode = ModeType.mode(type)
-            level = ANCLevel(modeType: type) ?? (mode == .anc ? level : nil)
-            restoreSettings()
+    private func parseNoise(_ p: [UInt8], prefix: UInt8) {
+        guard let bit = NoiseModeReport.activeBit(in: p, prefix: prefix) else { return }
+        // Some models report a different bit than the one used to set a mode.
+        guard let type = model.reportedBits[bit] else {
+            log?(.info, "unknown noise bit \(bit) for \(productID ?? "unknown model")")
             return
         }
+        noiseBit = bit
+        mode = ModeType.mode(type)
+        level = ANCLevel(modeType: type) ?? (mode == .anc ? level : nil)
+        restoreSettings()
     }
 
     /// Payload: <status> <count> (<address, reversed> <reserved> <2 = connected> <1 = this host> <name len> <name>)*

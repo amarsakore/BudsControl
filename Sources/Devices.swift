@@ -46,6 +46,16 @@ struct DeviceModel {
 }
 
 enum DeviceCatalog {
+    // Some realme Buds Air 5 units answer with the Nord Buds 2 product ID (062414).
+    // The Air 5 uses bit 3 for basic ANC. Its level-specific reports still mean ANC.
+    private static let realmeAir5 = DeviceModel(
+        name: "realme Buds Air 5", brand: .realme,
+        modeTypes: [ModeType.off, ModeType.transparency, ModeType.anc],
+        setBits: [0: ModeType.off, 1: ModeType.transparency, 3: ModeType.anc],
+        reportedBits: [0: ModeType.off, 1: ModeType.transparency,
+                       2: ModeType.anc, 3: ModeType.anc, 4: ModeType.anc, 5: ModeType.anc],
+        eqPresets: [(0, 101), (1, 102), (2, 103), (3, 104)], features: nil)
+
     /// Buds the catalog doesn't know: the layout most HeyMelody models share, limited to
     /// Off / Transparency / ANC because unknown models' ANC levels can't be trusted.
     static let generic = DeviceModel(
@@ -63,6 +73,10 @@ enum DeviceCatalog {
         eqPresets: [], features: nil)
 
     static func model(productID: String?, deviceName: String?) -> DeviceModel {
+        let isAir5 = deviceName?.lowercased().filter { !$0.isWhitespace } == "realmebudsair5"
+        if productID == "062012" || (isAir5 && (productID == nil || productID == "062414")) {
+            return realmeAir5
+        }
         if let productID, let model = models[productID] { return model }
         // realme product IDs end in 12 or 52 (OnePlus 14/54, OPPO 10/50).
         let realme = deviceName?.lowercased().contains("realme") == true

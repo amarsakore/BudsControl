@@ -102,6 +102,19 @@ struct FrameParser {
 
 // MARK: - Noise control modes
 
+enum NoiseModeReport {
+    /// Reply: 00 01 01 <mask LE>. Push: 03 01 01 <mask LE>.
+    /// Pushes starting with 03 02 describe the gesture cycle, and 03 04 reports Smart's chosen level.
+    static func activeBit(in payload: [UInt8], prefix: UInt8) -> Int? {
+        guard payload.count >= 4, payload[0] == prefix, payload[1] == 0x01, payload[2] == 0x01 else {
+            return nil
+        }
+        let highByte = payload.count >= 5 ? Int(payload[4]) << 8 : 0
+        let mask = Int(payload[3]) | highByte
+        return mask == 0 ? nil : mask.trailingZeroBitCount
+    }
+}
+
 enum NoiseMode: String, CaseIterable, Identifiable {
     case off, transparency, anc
     var id: String { rawValue }
@@ -246,6 +259,10 @@ enum EQPresets {
         case 34: "Vibrant"
         case 40: "Dynaudio Vocal"
         case 41: "Clear"
+        case 101: "Nature Balance"
+        case 102: "Bass Boost"
+        case 103: "Clear Vocals"
+        case 104: "Clear Bass"
         default: "Preset \(type)"
         }
     }
